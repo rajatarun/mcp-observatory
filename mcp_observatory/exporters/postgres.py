@@ -25,11 +25,23 @@ INSERT INTO mcp_traces (
     cost_usd,
     retries,
     fallback_used,
-    confidence
+    confidence,
+    risk_tier,
+    prompt_template_id,
+    prompt_hash,
+    normalized_prompt_hash,
+    prompt_size_chars,
+    is_shadow,
+    shadow_parent_trace_id,
+    gate_blocked,
+    fallback_type,
+    fallback_reason
 )
 VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12, $13, $14
+    $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19, $20, $21::uuid,
+    $22, $23, $24
 )
 """
 
@@ -88,6 +100,16 @@ class PostgresExporter(Exporter):
                 payload["retries"],
                 payload["fallback_used"],
                 payload["confidence"],
+                payload["risk_tier"],
+                payload["prompt_template_id"],
+                payload["prompt_hash"],
+                payload["normalized_prompt_hash"],
+                payload["prompt_size_chars"],
+                payload["is_shadow"],
+                payload["shadow_parent_trace_id"],
+                payload["gate_blocked"],
+                payload["fallback_type"],
+                payload["fallback_reason"],
             )
 
     async def close(self) -> None:

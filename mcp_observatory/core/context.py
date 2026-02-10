@@ -36,6 +36,18 @@ class TraceContext:
     fallback_used: bool = False
     confidence: Optional[float] = None
 
+    # Requested additional controls/attributes.
+    risk_tier: Optional[str] = None
+    prompt_template_id: Optional[str] = None
+    prompt_hash: Optional[str] = None
+    normalized_prompt_hash: Optional[str] = None
+    prompt_size_chars: int = 0
+    is_shadow: bool = False
+    shadow_parent_trace_id: Optional[str] = None
+    gate_blocked: bool = False
+    fallback_type: Optional[str] = None
+    fallback_reason: Optional[str] = None
+
     def finish(self) -> None:
         """Mark the span as finished."""
         self.end_time = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -57,4 +69,14 @@ class TraceContext:
             "retries": self.retries,
             "fallback_used": self.fallback_used,
             "confidence": self.confidence,
+            "risk_tier": self.risk_tier,
+            "prompt_template_id": self.prompt_template_id,
+            "prompt_hash": self.prompt_hash,
+            "normalized_prompt_hash": self.normalized_prompt_hash,
+            "prompt_size_chars": self.prompt_size_chars,
+            "is_shadow": self.is_shadow,
+            "shadow_parent_trace_id": self.shadow_parent_trace_id,
+            "gate_blocked": self.gate_blocked,
+            "fallback_type": self.fallback_type,
+            "fallback_reason": self.fallback_reason,
         }

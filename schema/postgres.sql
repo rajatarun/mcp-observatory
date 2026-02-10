@@ -14,9 +14,21 @@ CREATE TABLE IF NOT EXISTS mcp_traces (
     cost_usd FLOAT,
     retries INT,
     fallback_used BOOLEAN,
-    confidence FLOAT
+    confidence FLOAT,
+    risk_tier TEXT,
+    prompt_template_id TEXT,
+    prompt_hash TEXT,
+    normalized_prompt_hash TEXT,
+    prompt_size_chars INT,
+    is_shadow BOOLEAN,
+    shadow_parent_trace_id UUID,
+    gate_blocked BOOLEAN,
+    fallback_type TEXT,
+    fallback_reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_traces_trace_id ON mcp_traces(trace_id);
 CREATE INDEX IF NOT EXISTS idx_mcp_traces_service_start_time ON mcp_traces(service, start_time DESC);
 CREATE INDEX IF NOT EXISTS idx_mcp_traces_model_start_time ON mcp_traces(model, start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_mcp_traces_prompt_hash ON mcp_traces(prompt_hash);
+CREATE INDEX IF NOT EXISTS idx_mcp_traces_normalized_prompt_hash ON mcp_traces(normalized_prompt_hash);

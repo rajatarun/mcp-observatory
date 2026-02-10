@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from typing import Any, Awaitable, Callable, Optional
 
 from ..cost.pricing import estimate_cost
@@ -10,6 +12,10 @@ from ..exporters.base import Exporter
 from .tracer import Tracer
 
 ModelCallable = Callable[..., Awaitable[Any]]
+
+UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b")
+TIMESTAMP_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?\b")
+NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 
 
 class MCPInterceptor:
@@ -30,6 +36,14 @@ class MCPInterceptor:
         retries: int = 0,
         fallback_used: bool = False,
         confidence: Optional[float] = None,
+        risk_tier: Optional[str] = None,
+        prompt_template_id: Optional[str] = None,
+        is_shadow: bool = False,
+        shadow_parent_trace_id: Optional[str] = None,
+        gate_blocked: Optional[bool] = None,
+        confidence_gate_threshold: Optional[float] = None,
+        fallback_type: Optional[str] = None,
+        fallback_reason: Optional[str] = None,
         **call_kwargs: Any,
     ) -> Any:
         """Record telemetry around a model call.
@@ -37,17 +51,6 @@ class MCPInterceptor:
         Supports two usage patterns:
         1) Pass ``call`` (an async callable). The interceptor executes it.
         2) Pass an already-computed ``response`` (manual instrumentation mode).
-
-        Args:
-            model: Model identifier.
-            prompt: Prompt or request body.
-            response: Optional precomputed response payload.
-            call: Optional async callable that performs the model request.
-            tool_name: MCP tool name associated with the call.
-            retries: Retry count used for the request.
-            fallback_used: Whether a fallback model/strategy was used.
-            confidence: Optional confidence score for the response.
-            call_kwargs: Keyword arguments forwarded to ``call`` when provided.
         """
         if call is None and response is None:
             raise ValueError("Either `call` or `response` must be provided.")
@@ -57,6 +60,21 @@ class MCPInterceptor:
         span.retries = retries
         span.fallback_used = fallback_used
         span.confidence = confidence
+        span.risk_tier = risk_tier
+        span.prompt_template_id = prompt_template_id
+        span.prompt_size_chars = len(prompt)
+        span.prompt_hash = self._hash_text(prompt)
+        normalized_prompt = self._normalize_prompt(prompt)
+        span.normalized_prompt_hash = self._hash_text(normalized_prompt)
+        span.is_shadow = is_shadow
+        span.shadow_parent_trace_id = shadow_parent_trace_id if is_shadow else None
+        span.gate_blocked = (
+            gate_blocked
+            if gate_blocked is not None
+            else (confidence is not None and confidence_gate_threshold is not None and confidence < confidence_gate_threshold)
+        )
+        span.fallback_type = fallback_type
+        span.fallback_reason = fallback_reason
 
         try:
             result = response
@@ -90,3 +108,17 @@ class MCPInterceptor:
                 if isinstance(value, str):
                     return value
         return str(response)
+
+    @staticmethod
+    def _hash_text(value: str) -> str:
+        """Hash text to a stable SHA-256 digest."""
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _normalize_prompt(cls, prompt: str) -> str:
+        """Normalize prompt by removing UUIDs, timestamps, and numbers."""
+        normalized = UUID_RE.sub("<uuid>", prompt)
+        normalized = TIMESTAMP_RE.sub("<timestamp>", normalized)
+        normalized = NUMBER_RE.sub("<number>", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip().lower()
+        return normalized
