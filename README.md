@@ -4,13 +4,17 @@ MCP Observatory is a lightweight observability / APM library for Model Context P
 
 ## Features
 
-- `TraceContext` aligned to the PostgreSQL schema fields:
+- `TraceContext` aligned to PostgreSQL schema fields:
   - `trace_id`, `span_id`, `parent_span_id`, `service`, `model`, `tool_name`
   - `start_time`, `end_time`, `prompt_tokens`, `completion_tokens`, `cost_usd`
   - `retries`, `fallback_used`, `confidence`
-- `Tracer` start/end span helpers.
-- `MCPInterceptor` to wrap model calls and collect metrics.
-- Token and cost estimation utilities.
+- `MCPInterceptor` with derived metrics for:
+  - golden financial scenarios
+  - prompt diff detectors
+  - shadow model evaluations
+  - confidence-gated execution
+  - deterministic fallbacks for high-risk paths
+- Built-in alert evaluation (`get_active_alerts`) from configurable thresholds.
 - `PostgresExporter` powered by `asyncpg`.
 
 ## Installation
@@ -45,25 +49,41 @@ async def main():
         model="gpt-4o",
         prompt="Hello MCP",
         response="Hello human",
+        confidence=0.64,
+        confidence_gate_threshold=0.70,
+        high_risk_path=True,
+        deterministic_fallback_triggered=True,
+        prompt_diff_score=0.42,
+        shadow_agreement=False,
+        is_golden_financial_scenario=True,
+        golden_scenario_passed=True,
     )
+
+    snapshot = interceptor.get_metrics_snapshot()
+    alerts = interceptor.get_active_alerts()
+    print(snapshot)
+    print(alerts)
 
 
 asyncio.run(main())
 ```
 
-## Async callable mode
+## Metrics for decision patterns
 
-```python
-async def model_call(*, prompt: str, model: str):
-    return {"text": f"{model} says: {prompt}"}
+`MCPInterceptor.get_metrics_snapshot()` provides rates and measurements to drive alerts:
 
-await interceptor.intercept_model_call(
-    model="gpt-4o-mini",
-    prompt="What is MCP observability?",
-    call=model_call,
-    tool_name="answer_question",
-)
-```
+- `avg_cost_usd`
+- `fallback_rate`
+- `retry_rate`
+- `low_confidence_rate`
+- `confidence_gate_block_rate`
+- `prompt_diff_violation_rate`
+- `shadow_disagreement_rate`
+- `deterministic_fallback_rate`
+- `high_risk_path_rate`
+- `golden_financial_failure_rate`
+
+`MCPInterceptor.get_active_alerts()` compares these against defaults and returns triggered alert keys.
 
 ## Database setup
 
