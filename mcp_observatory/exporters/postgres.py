@@ -30,6 +30,14 @@ INSERT INTO mcp_traces (
     prompt_template_id,
     prompt_hash,
     normalized_prompt_hash,
+    answer_hash,
+    grounding_score,
+    verifier_score,
+    self_consistency_score,
+    numeric_variance_score,
+    tool_claim_mismatch,
+    hallucination_risk_score,
+    hallucination_risk_level,
     prompt_size_chars,
     is_shadow,
     shadow_parent_trace_id,
@@ -40,8 +48,9 @@ INSERT INTO mcp_traces (
 VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4, $5, $6,
     $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18, $19, $20, $21::uuid,
-    $22, $23, $24
+    $15, $16, $17, $18, $19, $20, $21, $22,
+    $23, $24, $25, $26, $27, $28, $29::uuid,
+    $30, $31, $32
 )
 """
 
@@ -104,6 +113,14 @@ class PostgresExporter(Exporter):
                 payload["prompt_template_id"],
                 payload["prompt_hash"],
                 payload["normalized_prompt_hash"],
+                payload["answer_hash"],
+                payload["grounding_score"],
+                payload["verifier_score"],
+                payload["self_consistency_score"],
+                payload["numeric_variance_score"],
+                payload["tool_claim_mismatch"],
+                payload["hallucination_risk_score"],
+                payload["hallucination_risk_level"],
                 payload["prompt_size_chars"],
                 payload["is_shadow"],
                 payload["shadow_parent_trace_id"],

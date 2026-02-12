@@ -7,20 +7,25 @@ from typing import Optional
 from .core.interceptor import MCPInterceptor
 from .core.tracer import Tracer
 from .exporters.base import Exporter
+from .hallucination.config import HallucinationConfig
+from .hallucination.signals import Verifier
 
 
-def instrument(service_name: str, *, exporter: Optional[Exporter] = None) -> MCPInterceptor:
-    """Create a ready-to-use interceptor for an MCP server.
-
-    Args:
-        service_name: Logical service name for traces.
-        exporter: Optional exporter instance for shipping telemetry.
-
-    Returns:
-        Configured :class:`~mcp_observatory.core.interceptor.MCPInterceptor`.
-    """
+def instrument(
+    service_name: str,
+    *,
+    exporter: Optional[Exporter] = None,
+    hallucination_config: Optional[HallucinationConfig] = None,
+    verifier: Optional[Verifier] = None,
+) -> MCPInterceptor:
+    """Create a ready-to-use interceptor for an MCP server."""
     tracer = Tracer(service=service_name)
-    return MCPInterceptor(tracer=tracer, exporter=exporter)
+    return MCPInterceptor(
+        tracer=tracer,
+        exporter=exporter,
+        hallucination_config=hallucination_config,
+        verifier=verifier,
+    )
 
 
 # Backward-compatible alias.
