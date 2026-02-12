@@ -9,6 +9,18 @@ from typing import Any, Awaitable, Callable, Optional
 from ..cost.pricing import estimate_cost
 from ..cost.tokenizer import estimate_tokens
 from ..exporters.base import Exporter
+from ..hallucination.config import HallucinationConfig
+from ..hallucination.scoring import compute_hallucination_risk_score, risk_level_for_score
+from ..hallucination.signals import (
+    LocalHeuristicVerifier,
+    Verifier,
+    compute_grounding_score,
+    compute_numeric_variance_score,
+    compute_self_consistency_score,
+    detect_tool_claim_mismatch,
+    normalize_text,
+    sha256_hash,
+)
 from .tracer import Tracer
 
 ModelCallable = Callable[..., Awaitable[Any]]
@@ -21,9 +33,18 @@ NUMBER_RE = re.compile(r"\b\d+(?:\.\d+)?\b")
 class MCPInterceptor:
     """Intercepts async model calls to collect trace and cost metrics."""
 
-    def __init__(self, tracer: Tracer, exporter: Optional[Exporter] = None) -> None:
+    def __init__(
+        self,
+        tracer: Tracer,
+        exporter: Optional[Exporter] = None,
+        *,
+        hallucination_config: Optional[HallucinationConfig] = None,
+        verifier: Optional[Verifier] = None,
+    ) -> None:
         self.tracer = tracer
         self.exporter = exporter
+        self.hallucination_config = hallucination_config or HallucinationConfig()
+        self.verifier = verifier or LocalHeuristicVerifier()
 
     async def intercept_model_call(
         self,
@@ -44,14 +65,12 @@ class MCPInterceptor:
         confidence_gate_threshold: Optional[float] = None,
         fallback_type: Optional[str] = None,
         fallback_reason: Optional[str] = None,
+        secondary_response: Any = None,
+        retrieved_context: Optional[str] = None,
+        tool_result_summary: Optional[str] = None,
         **call_kwargs: Any,
     ) -> Any:
-        """Record telemetry around a model call.
-
-        Supports two usage patterns:
-        1) Pass ``call`` (an async callable). The interceptor executes it.
-        2) Pass an already-computed ``response`` (manual instrumentation mode).
-        """
+        """Record telemetry around a model call."""
         if call is None and response is None:
             raise ValueError("Either `call` or `response` must be provided.")
 
@@ -82,13 +101,22 @@ class MCPInterceptor:
                 result = await call(prompt=prompt, model=model, **call_kwargs)
 
             response_text = self._extract_response_text(result)
+            secondary_text = self._extract_response_text(secondary_response) if secondary_response is not None else None
             span.completion_tokens = estimate_tokens(response_text)
             span.cost_usd = estimate_cost(model, span.prompt_tokens, span.completion_tokens)
-            self.tracer.end_span(span)
 
+            await self._populate_hallucination_fields(
+                prompt=prompt,
+                answer=response_text,
+                secondary_answer=secondary_text,
+                retrieved_context=retrieved_context,
+                tool_result_summary=tool_result_summary,
+                span=span,
+            )
+
+            self.tracer.end_span(span)
             if self.exporter:
                 await self.exporter.export(span)
-
             return result
         except Exception:
             span.cost_usd = estimate_cost(model, span.prompt_tokens, 0)
@@ -96,6 +124,47 @@ class MCPInterceptor:
             if self.exporter:
                 await self.exporter.export(span)
             raise
+
+    async def _populate_hallucination_fields(
+        self,
+        *,
+        prompt: str,
+        answer: str,
+        secondary_answer: Optional[str],
+        retrieved_context: Optional[str],
+        tool_result_summary: Optional[str],
+        span: Any,
+    ) -> None:
+        config = self.hallucination_config
+
+        if config.enable_prompt_hash:
+            span.prompt_hash = sha256_hash(normalize_text(prompt))
+            span.answer_hash = sha256_hash(normalize_text(answer))
+
+        if config.enable_grounding_score:
+            span.grounding_score = compute_grounding_score(answer, retrieved_context)
+
+        if config.enable_self_consistency:
+            if config.self_consistency_mode in {"inline", "shadow"}:
+                span.self_consistency_score = compute_self_consistency_score(answer, secondary_answer)
+
+        if config.enable_numeric_variance:
+            span.numeric_variance_score = compute_numeric_variance_score(answer, secondary_answer)
+
+        if config.enable_tool_claim_mismatch:
+            span.tool_claim_mismatch = detect_tool_claim_mismatch(answer, tool_result_summary)
+
+        if config.enable_verifier:
+            span.verifier_score, _reason = await self.verifier.score(prompt, answer, context=retrieved_context)
+
+        span.hallucination_risk_score = compute_hallucination_risk_score(
+            grounding_score=span.grounding_score,
+            self_consistency_score=span.self_consistency_score,
+            verifier_score=span.verifier_score,
+            numeric_variance_score=span.numeric_variance_score,
+            tool_claim_mismatch=span.tool_claim_mismatch,
+        )
+        span.hallucination_risk_level = risk_level_for_score(span.hallucination_risk_score)
 
     @staticmethod
     def _extract_response_text(response: Any) -> str:

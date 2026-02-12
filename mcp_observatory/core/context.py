@@ -41,6 +41,14 @@ class TraceContext:
     prompt_template_id: Optional[str] = None
     prompt_hash: Optional[str] = None
     normalized_prompt_hash: Optional[str] = None
+    answer_hash: Optional[str] = None
+    grounding_score: Optional[float] = None
+    verifier_score: Optional[float] = None
+    self_consistency_score: Optional[float] = None
+    numeric_variance_score: Optional[float] = None
+    tool_claim_mismatch: Optional[bool] = None
+    hallucination_risk_score: Optional[float] = None
+    hallucination_risk_level: Optional[str] = None
     prompt_size_chars: int = 0
     is_shadow: bool = False
     shadow_parent_trace_id: Optional[str] = None
@@ -73,6 +81,14 @@ class TraceContext:
             "prompt_template_id": self.prompt_template_id,
             "prompt_hash": self.prompt_hash,
             "normalized_prompt_hash": self.normalized_prompt_hash,
+            "answer_hash": self.answer_hash,
+            "grounding_score": self.grounding_score,
+            "verifier_score": self.verifier_score,
+            "self_consistency_score": self.self_consistency_score,
+            "numeric_variance_score": self.numeric_variance_score,
+            "tool_claim_mismatch": self.tool_claim_mismatch,
+            "hallucination_risk_score": self.hallucination_risk_score,
+            "hallucination_risk_level": self.hallucination_risk_level,
             "prompt_size_chars": self.prompt_size_chars,
             "is_shadow": self.is_shadow,
             "shadow_parent_trace_id": self.shadow_parent_trace_id,

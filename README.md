@@ -62,6 +62,33 @@ For offline/parallel quality comparisons:
 ### 2.6 PostgreSQL Export
 Native async exporter writes structured spans to Postgres (`asyncpg`) for SIEM/APM warehouse integration.
 
+
+### 2.7 Hallucination Indicators
+First-class hallucination indicators can be computed inline or in shadow-style workflows:
+
+- `answer_hash`: SHA-256 of normalized answer text
+- `grounding_score`: Jaccard overlap between answer and retrieved context
+- `verifier_score`: local heuristic verifier score
+- `self_consistency_score`: Jaccard overlap between primary and secondary answers
+- `numeric_variance_score`: numeric instability proxy in answer(s)
+- `tool_claim_mismatch`: mismatch flag between tool failure and answer success claims
+- `hallucination_risk_score` and `hallucination_risk_level`
+
+Composite risk formula (using available components and renormalized weights):
+
+```text
+grounding_risk       = 1 - grounding_score
+consistency_risk     = 1 - self_consistency_score
+verifier_risk        = 1 - verifier_score
+numeric_risk         = numeric_variance_score
+tool_mismatch_risk   = 1.0 if tool_claim_mismatch else 0.0
+
+score = sum(risk_i * weight_i) / sum(weight_i)    # only non-None components
+weights: grounding=0.30, consistency=0.25, verifier=0.25, numeric=0.10, tool=0.10
+risk_level: low <0.20, medium <0.35, else high
+```
+
+
 ---
 
 ## 3. Architecture Overview
@@ -159,6 +186,14 @@ asyncio.run(main())
 | `prompt_template_id` | TEXT | Template version control |
 | `prompt_hash` | TEXT | Exact prompt identity |
 | `normalized_prompt_hash` | TEXT | Prompt identity minus dynamic noise |
+| `answer_hash` | TEXT | Normalized answer identity |
+| `grounding_score` | FLOAT | Overlap-based grounding proxy (0..1) |
+| `verifier_score` | FLOAT | Local verifier goodness (0..1) |
+| `self_consistency_score` | FLOAT | Primary/secondary answer overlap (0..1) |
+| `numeric_variance_score` | FLOAT | Numeric instability proxy (0..1) |
+| `tool_claim_mismatch` | BOOLEAN | Success-claim vs tool-failure mismatch |
+| `hallucination_risk_score` | FLOAT | Composite hallucination risk (0..1) |
+| `hallucination_risk_level` | TEXT | low/medium/high risk bucket |
 | `prompt_size_chars` | INT | Prompt payload size |
 | `is_shadow` | BOOLEAN | Shadow evaluation marker |
 | `shadow_parent_trace_id` | UUID | Parent trace reference for shadow run |
