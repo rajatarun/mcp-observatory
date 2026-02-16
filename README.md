@@ -1,114 +1,116 @@
 # MCP Observatory
 
-MCP Observatory provides observability and a **risk-bound execution control plane** for MCP tools.
+MCP Observatory now includes a **two-phase execution pattern** for high-risk MCP tool calls:
 
-## v2 Architecture (Control Plane + Data Plane)
+1. **PROPOSE**: plan/simulate, evaluate uncertainty/integrity, no side effects.
+2. **COMMIT**: execute side effects only when a signed commit token is valid.
 
-### Control Plane
-1. Intercept `tools/call` requests.
-2. Compute risk vector signals (grounding, self-consistency, numeric instability, tool mismatch, prompt drift, verifier risk).
-3. Compute renormalized composite risk score.
-4. Evaluate tool policy matrix by criticality and score (`ALLOW`, `BLOCK`, `REVIEW`).
-5. If required, issue short-lived signed internal execution token.
-6. Verify token at tool wrapper boundary.
-7. If blocked/reviewed, route deterministic fallback or deterministic safe response.
-8. Optionally schedule async shadow verification lane for disagreement metrics.
-
-### Data Plane
-All decisions and telemetry are exported to Postgres (`mcp_traces`) for dashboards and audit.
-
-> Security note: execution tokens are internal signed authorization artifacts for tool execution. They are **not OAuth** and should not be exposed externally. Persist only token hashes.
-
-## Composite Risk Formula
-
-Weights:
-- grounding_risk: `0.30`
-- self_consistency_risk: `0.25`
-- verifier_risk: `0.25`
-- numeric_instability_risk: `0.10`
-- tool_mismatch_risk: `0.10`
-- drift_risk: `0.10`
-
-Only non-null components are used, then weights are renormalized:
+## Two-Phase Sequence (Text Diagram)
 
 ```text
-composite = sum(risk_i * w_i) / sum(w_i)  # over non-None risks
+Client
+  -> transfer_funds_propose(amount,to)
+      -> scoring(output_instability, numeric_variance, prompt_drift)
+      -> decision:
+          - blocked: deterministic fallback (create_draft), no side effects
+          - allowed: issue signed commit_token bound to tool args hash
+  <- {proposal_id, commit_token?}
+
+Client
+  -> transfer_funds_commit(proposal_id, commit_token, amount, to)
+      -> verify signature + expiry + proposal existence + args_hash binding + nonce replay
+      -> if valid: perform side effect (funds transfer)
+      -> else: block with explicit reason
+  <- commit outcome
 ```
 
-Risk levels:
-- `< 0.20` -> `low`
-- `0.20 <= score < 0.35` -> `medium`
-- `>= 0.35` -> `high`
+## New Modules
 
-## Policy Matrix
+- `mcp_observatory/proposal_commit/hashing.py`
+  - canonical JSON hashing for stable `tool_args_hash`
+  - normalized `prompt_hash`
+- `mcp_observatory/proposal_commit/scoring.py`
+  - `output_instability = 1 - jaccard_similarity`
+  - `numeric_variance` from extracted numbers
+  - `prompt_drift` from prompt hash vs baseline
+  - weighted renormalized `composite_score`
+  - demo `model_generate(prompt, temperature)` stub
+- `mcp_observatory/proposal_commit/token.py`
+  - HMAC-SHA256 token issue/verify
+  - payload fields: `token_id, proposal_id, tool_name, tool_args_hash, issued_at, expires_at, nonce, composite_score`
+- `mcp_observatory/proposal_commit/proposer.py`
+  - proposal logic and deterministic blocked fallback
+- `mcp_observatory/proposal_commit/verifier.py`
+  - commit verification and nonce replay protection
+- `mcp_observatory/proposal_commit/storage.py`
+  - in-memory storage fallback
+  - optional Postgres storage via `asyncpg`
+- `mcp_observatory/demo/server.py`
+  - MCP-like tools:
+    - `transfer_funds_propose`
+    - `transfer_funds_commit`
+- `mcp_observatory/demo/run_demo.py`
+  - propose -> commit -> replay-attempt demo
+- `sql/schema.sql`
+  - Postgres tables: `proposals`, `commits`, `nonces`, `tool_prompt_baselines`
 
-- **HIGH criticality**
-  - `score >= 0.35`: `BLOCK`
-  - `0.20 <= score < 0.35`: `REVIEW`
-  - `< 0.20`: `ALLOW` (token required)
-- **MEDIUM criticality**
-  - `score >= 0.50`: `REVIEW`
-  - else `ALLOW` (token not required)
-- **LOW criticality**
-  - always `ALLOW`
+## Security / Verification Rules
 
-## Quick Start
+Commit verifies all of the following:
 
-```python
-import asyncio
-from mcp_observatory import instrument
-from mcp_observatory.policy.registry import DEFAULT_REGISTRY, tool_profile
-from mcp_observatory.fallback.router import FallbackRouter
+- token signature is valid (`bad_signature` on failure)
+- token not expired (`expired`)
+- proposal exists and was allowed (`unknown_proposal`)
+- commit args hash equals token payload args hash (`args_hash_mismatch`)
+- nonce has not already been used (`nonce_replay`)
 
-@tool_profile(criticality="HIGH", irreversible=True, regulatory=True, risk_tier="HIGH", registry=DEFAULT_REGISTRY)
-async def execute_transfer(*, amount: float, destination: str):
-    return {"status": "executed", "amount": amount, "destination": destination}
+## Deterministic Fallback on Proposal Block
 
-async def draft_transfer(tool_args: dict):
-    return {"status": "draft_created", **tool_args}
+Blocked proposal response is deterministic and side-effect free:
 
-async def main():
-    router = FallbackRouter()
-    router.register("execute_transfer", draft_transfer)
-
-    interceptor = instrument("payments", fallback_router=router)
-
-    result = await interceptor.intercept_tool_call(
-        tool_name="execute_transfer",
-        tool_args={"amount": 1000.0, "destination": "acct-001"},
-        tool_fn=execute_transfer,
-        prompt="Transfer funds now",
-        model_answer="Transfer completed successfully.",
-        tool_result_summary="payment API failed: transfer declined",
-        retrieved_context="declined transfer",
-        prompt_template_id="payments-v2",
-    )
-    print(result)
-
-asyncio.run(main())
+```json
+{
+  "status": "blocked",
+  "action": "create_draft",
+  "reason": "low_integrity",
+  "draft": {"tool": "transfer_funds", "amount": 100, "to": "acct_123"}
+}
 ```
 
-## Postgres Schema
+## Running the Demo
 
-Apply schema:
+### Without Postgres (default)
+
+No env vars needed; in-memory store is used.
 
 ```bash
-psql "$DATABASE_URL" -f schema/postgres.sql
+python -m mcp_observatory.demo.run_demo
 ```
 
-Recommended dashboard pivots:
-- decision trends: `policy_decision` over time
-- risk distribution: `composite_risk_level`, `composite_risk_score`
-- high-risk tools: `(service, tool_name)` with `BLOCK/REVIEW` rate
-- drift tracking: `prompt_template_id` + `prompt_hash`
-- shadow quality: `shadow_disagreement_score`, `shadow_numeric_variance`
+### With Postgres
 
-## Example
-
-Run:
+1. Set DSN:
 
 ```bash
-python examples/simple_mcp_server.py
+export MCP_OBSERVATORY_PG_DSN='postgresql://user:pass@localhost:5432/postgres'
 ```
 
-This example registers a high-criticality tool and demonstrates deterministic fallback when risk policy blocks direct execution.
+2. Apply schema:
+
+```bash
+psql "$MCP_OBSERVATORY_PG_DSN" -f sql/schema.sql
+```
+
+3. Run demo:
+
+```bash
+python -m mcp_observatory.demo.run_demo
+```
+
+## Testing
+
+```bash
+PYTHONPATH=. pytest -q
+```
+
+The suite includes tests for token verification, hash stability, replay protection, and expired-token rejection.
