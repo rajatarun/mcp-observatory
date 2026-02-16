@@ -1,46 +1,55 @@
-"""Example MCP server instrumentation using MCP Observatory and PostgresExporter."""
+"""Example MCP server using v2 risk-bound execution control plane."""
 
 from __future__ import annotations
 
 import asyncio
 import os
 
-from mcp_observatory import HallucinationConfig, instrument
+from mcp_observatory import instrument
 from mcp_observatory.exporters import PostgresExporter
+from mcp_observatory.fallback.router import FallbackRouter
+from mcp_observatory.policy.registry import DEFAULT_REGISTRY, tool_profile
+
+
+@tool_profile(criticality="HIGH", irreversible=True, regulatory=True, risk_tier="HIGH", registry=DEFAULT_REGISTRY)
+async def execute_transfer(*, amount: float, destination: str) -> dict:
+    return {"status": "executed", "amount": amount, "destination": destination}
+
+
+async def draft_transfer(tool_args: dict) -> dict:
+    return {
+        "status": "draft_created",
+        "amount": tool_args.get("amount"),
+        "destination": tool_args.get("destination"),
+        "message": "Transfer blocked; created draft for review.",
+    }
 
 
 async def main() -> None:
     dsn = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/postgres")
-
     exporter = PostgresExporter(dsn=dsn)
-    interceptor = instrument(
-        "example-mcp-server",
-        exporter=exporter,
-        hallucination_config=HallucinationConfig(enable_self_consistency=True, self_consistency_mode="shadow"),
-    )
+
+    fallback_router = FallbackRouter()
+    fallback_router.register("execute_transfer", draft_transfer)
+
+    interceptor = instrument("example-mcp-server", exporter=exporter, fallback_router=fallback_router)
 
     try:
-        response = await interceptor.intercept_model_call(
-            model="gpt-4o",
-            prompt="Invoice #92311 at 2026-02-10T12:01:00Z for customer 1002 uuid 550e8400-e29b-41d4-a716-446655440000",
-            response="Payment completed and sent. Total due is 149.25 USD.",
-            secondary_response="Payment done. Amount processed: 150.25 USD.",
-            retrieved_context="invoice 92311 customer 1002 balance due 149.25 usd payment failed due to declined card",
-            tool_result_summary="payment API failed: card declined by issuer",
-            tool_name="payment_risk_check",
-            retries=1,
-            confidence=0.42,
-            risk_tier="high",
-            prompt_template_id="payment-risk-v3",
-            is_shadow=True,
-            shadow_parent_trace_id="11111111-1111-4111-8111-111111111111",
-            gate_blocked=True,
-            fallback_used=True,
-            fallback_type="human_review",
-            fallback_reason="low_confidence",
+        result = await interceptor.intercept_tool_call(
+            tool_name="execute_transfer",
+            tool_args={"amount": 25000.0, "destination": "acct-0091"},
+            tool_fn=execute_transfer,
+            prompt="Transfer 25,000 USD to acct-0091 immediately.",
+            model_answer="Transfer completed successfully and funds were sent.",
+            secondary_answer="Transfer may have completed.",
+            retrieved_context="payments gateway returned declined, transfer failed",
+            tool_result_summary="payment API failed: transfer declined",
+            prompt_template_id="transfer-prod-v2",
+            request_id="req-demo-001",
+            session_id="sess-demo-001",
+            shadow_answer="Transfer failed and was not sent.",
         )
-        print("Model response:", response)
-        print("Hallucination fields were computed and exported with this call.")
+        print("Tool result:", result)
     finally:
         await exporter.close()
 

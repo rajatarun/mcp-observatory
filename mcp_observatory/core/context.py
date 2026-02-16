@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+from ..utils.time import utc_now_naive
+
 
 def _new_id() -> str:
-    """Generate a unique trace/span identifier as UUID text."""
     return str(uuid4())
 
 
 @dataclass
 class TraceContext:
-    """Represents telemetry for a single MCP model interaction span.
-
-    Fields are intentionally aligned with the PostgreSQL schema in
-    ``schema/postgres.sql``.
-    """
+    """Represents telemetry for a single MCP interaction span."""
 
     service: str
     model: Optional[str] = None
@@ -27,7 +24,7 @@ class TraceContext:
     trace_id: str = field(default_factory=_new_id)
     span_id: str = field(default_factory=_new_id)
     parent_span_id: Optional[str] = None
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    start_time: datetime = field(default_factory=utc_now_naive)
     end_time: Optional[datetime] = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -36,7 +33,7 @@ class TraceContext:
     fallback_used: bool = False
     confidence: Optional[float] = None
 
-    # Requested additional controls/attributes.
+    # v1/v2 shared fields
     risk_tier: Optional[str] = None
     prompt_template_id: Optional[str] = None
     prompt_hash: Optional[str] = None
@@ -56,43 +53,31 @@ class TraceContext:
     fallback_type: Optional[str] = None
     fallback_reason: Optional[str] = None
 
+    # v2 execution control plane
+    request_id: Optional[str] = None
+    session_id: Optional[str] = None
+    method: Optional[str] = None
+    tool_args_hash: Optional[str] = None
+    tool_criticality: Optional[str] = None
+    policy_decision: Optional[str] = None
+    policy_id: Optional[str] = None
+    policy_version: Optional[str] = None
+    grounding_risk: Optional[float] = None
+    self_consistency_risk: Optional[float] = None
+    numeric_instability_risk: Optional[float] = None
+    tool_mismatch_risk: Optional[float] = None
+    drift_risk: Optional[float] = None
+    composite_risk_score: Optional[float] = None
+    composite_risk_level: Optional[str] = None
+    shadow_disagreement_score: Optional[float] = None
+    shadow_numeric_variance: Optional[float] = None
+    exec_token_id: Optional[str] = None
+    exec_token_ttl_ms: Optional[int] = None
+    exec_token_hash: Optional[str] = None
+    exec_token_verified: Optional[bool] = None
+
     def finish(self) -> None:
-        """Mark the span as finished."""
-        self.end_time = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.end_time = utc_now_naive()
 
     def to_dict(self) -> dict:
-        """Serialize context for exporters."""
-        return {
-            "trace_id": self.trace_id,
-            "span_id": self.span_id,
-            "parent_span_id": self.parent_span_id,
-            "service": self.service,
-            "model": self.model,
-            "tool_name": self.tool_name,
-            "start_time": self.start_time,
-            "end_time": self.end_time,
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "cost_usd": self.cost_usd,
-            "retries": self.retries,
-            "fallback_used": self.fallback_used,
-            "confidence": self.confidence,
-            "risk_tier": self.risk_tier,
-            "prompt_template_id": self.prompt_template_id,
-            "prompt_hash": self.prompt_hash,
-            "normalized_prompt_hash": self.normalized_prompt_hash,
-            "answer_hash": self.answer_hash,
-            "grounding_score": self.grounding_score,
-            "verifier_score": self.verifier_score,
-            "self_consistency_score": self.self_consistency_score,
-            "numeric_variance_score": self.numeric_variance_score,
-            "tool_claim_mismatch": self.tool_claim_mismatch,
-            "hallucination_risk_score": self.hallucination_risk_score,
-            "hallucination_risk_level": self.hallucination_risk_level,
-            "prompt_size_chars": self.prompt_size_chars,
-            "is_shadow": self.is_shadow,
-            "shadow_parent_trace_id": self.shadow_parent_trace_id,
-            "gate_blocked": self.gate_blocked,
-            "fallback_type": self.fallback_type,
-            "fallback_reason": self.fallback_reason,
-        }
+        return self.__dict__.copy()
