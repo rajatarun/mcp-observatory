@@ -68,6 +68,7 @@ class MCPInterceptor:
         secondary_response: Any = None,
         retrieved_context: Optional[str] = None,
         tool_result_summary: Optional[str] = None,
+        return_span: bool = False,
         **call_kwargs: Any,
     ) -> Any:
         """Record telemetry around a model call."""
@@ -117,6 +118,8 @@ class MCPInterceptor:
             self.tracer.end_span(span)
             if self.exporter:
                 await self.exporter.export(span)
+            if return_span:
+                return result, span
             return result
         except Exception:
             span.cost_usd = estimate_cost(model, span.prompt_tokens, 0)

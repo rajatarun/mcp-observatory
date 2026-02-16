@@ -166,6 +166,53 @@ asyncio.run(main())
 
 ---
 
+
+## 6.1 Tiered Execution Policy (Cost + Confidence + Hallucination)
+
+MCP Observatory also provides a configuration-catered execution engine for
+policy-based response routing. Define three tiers with cost ceilings, minimum
+confidence, and maximum hallucination risk. Hallucination risk is calculated
+by MCP Observatory from all hallucination module signals (`grounding_score`,
+`verifier_score`, `self_consistency_score`, `numeric_variance_score`,
+`tool_claim_mismatch`) and then compared to tier policy.
+
+- If MCP cost exceeds the selected tier budget, the transaction is flagged as a
+  cost breach in the returned decision metadata.
+- If confidence or hallucination thresholds fail, the engine routes to a
+  deterministic fallback path and returns the fallback response.
+
+```python
+from mcp_observatory import instrument
+from mcp_observatory.execution import TieredExecutionConfig, TieredExecutionEngine
+
+interceptor = instrument(service_name="payments-mcp")
+config = TieredExecutionConfig.from_base_cost(
+    0.01,
+    tier_1_confidence=0.55,
+    tier_1_hallucination_risk=0.45,
+)
+engine = TieredExecutionEngine(interceptor, config)
+
+async def deterministic_fallback(*, prompt: str, model: str):
+    return "Deterministic policy response"
+
+result = await engine.execute(
+    tier_name="tier_1",
+    model="gpt-4o",
+    prompt="Summarize invoice 2217",
+    mcp_response="Generated answer",
+    confidence=0.42,
+    deterministic_fallback=deterministic_fallback,
+)
+
+print(result.response)                       # fallback response
+print(result.decision.fallback_used)         # True
+print(result.decision.fallback_reason)       # low_confidence / high_hallucination
+print(result.decision.cost_breached)         # True/False
+```
+
+---
+
 ## 6. Operational Field Dictionary
 
 | Field | Type | Purpose |
