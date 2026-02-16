@@ -32,7 +32,11 @@ class DemoToolServer:
     async def transfer_funds_propose(self, *, amount: float, to: str) -> dict:
         """Proposal tool: never executes side effects."""
         prompt = f"Transfer {amount} to {to}."
-        return await self.proposer.propose_transfer_funds(amount=amount, to=to, prompt=prompt)
+        return await self.proposer.propose(
+            tool_name="transfer_funds",
+            tool_args={"amount": amount, "to": to},
+            prompt=prompt,
+        )
 
     async def transfer_funds_commit(self, *, proposal_id: str, commit_token: str, amount: float, to: str) -> dict:
         """Commit tool: executes side effects only with valid authorization artifact."""

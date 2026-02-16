@@ -1,6 +1,6 @@
 # MCP Observatory
 
-MCP Observatory now includes a **two-phase execution pattern** for high-risk MCP tool calls:
+MCP Observatory now includes a **two-phase execution pattern** for high-risk MCP tool calls, with a generic proposer/verifier wrapper that can be reused by any tool:
 
 1. **PROPOSE**: plan/simulate, evaluate uncertainty/integrity, no side effects.
 2. **COMMIT**: execute side effects only when a signed commit token is valid.
@@ -39,7 +39,8 @@ Client
   - HMAC-SHA256 token issue/verify
   - payload fields: `token_id, proposal_id, tool_name, tool_args_hash, issued_at, expires_at, nonce, composite_score`
 - `mcp_observatory/proposal_commit/proposer.py`
-  - proposal logic and deterministic blocked fallback
+  - generic `ToolProposer.propose(...)` for any tool name/args
+  - deterministic blocked fallback
 - `mcp_observatory/proposal_commit/verifier.py`
   - commit verification and nonce replay protection
 - `mcp_observatory/proposal_commit/storage.py`

@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Optional
 from uuid import uuid4
 
 from .hashing import canonical_json, prompt_hash, tool_args_hash
-from .scoring import (
-    composite_score,
-    model_generate,
-    numeric_variance,
-    output_instability,
-    prompt_drift,
-)
+from .scoring import composite_score, model_generate, numeric_variance, output_instability, prompt_drift
 from .storage import ProposalCommitStorage, utc_now
 from .token import CommitTokenManager
 
@@ -25,7 +20,7 @@ class ProposalConfig:
 
 
 class ToolProposer:
-    """Performs proposal-only checks and returns authorization artifacts if allowed."""
+    """Generic proposal evaluator that never executes side effects."""
 
     def __init__(
         self,
@@ -38,24 +33,35 @@ class ToolProposer:
         self.token_manager = token_manager
         self.config = config or ProposalConfig()
 
-    async def propose_transfer_funds(self, *, amount: float, to: str, prompt: str) -> dict:
-        """Propose transfer without side effects; return token only when allowed."""
-        tool_name = "transfer_funds"
-        args = {"amount": amount, "to": to}
-        args_json = canonical_json(args)
-        args_digest = tool_args_hash(args)
+    async def propose(
+        self,
+        *,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        prompt: str,
+        candidate_output_a: Optional[str] = None,
+        candidate_output_b: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Generic proposal flow for any tool.
+
+        Returns either:
+        - allowed response with proposal_id + commit_token
+        - deterministic blocked response with draft action
+        """
+        args_json = canonical_json(tool_args)
+        args_digest = tool_args_hash(tool_args)
 
         baseline = await self.storage.get_baseline_prompt_hash(tool_name)
         p_hash = prompt_hash(prompt)
         if baseline is None:
             await self.storage.set_baseline_prompt_hash(tool_name, p_hash)
 
-        candidate_a = model_generate(prompt, temperature=0.0)
-        candidate_b = model_generate(prompt, temperature=0.7)
+        out_a = candidate_output_a if candidate_output_a is not None else model_generate(prompt, temperature=0.0)
+        out_b = candidate_output_b if candidate_output_b is not None else model_generate(prompt, temperature=0.7)
 
         signals = {
-            "output_instability": output_instability(candidate_a, candidate_b),
-            "numeric_variance": numeric_variance(candidate_a, candidate_b),
+            "output_instability": output_instability(out_a, out_b),
+            "numeric_variance": numeric_variance(out_a, out_b),
             "prompt_drift": prompt_drift(prompt, baseline),
         }
         score = composite_score(signals)
@@ -80,9 +86,8 @@ class ToolProposer:
                 "proposal_id": proposal_id,
                 "draft": {
                     "tool": tool_name,
-                    "amount": amount,
-                    "to": to,
-                    "note": "Transfer blocked in proposal phase. No side effects executed.",
+                    "args": tool_args,
+                    "note": "Action blocked in proposal phase. No side effects executed.",
                 },
                 "signals": signals,
                 "composite_score": score,
@@ -98,6 +103,7 @@ class ToolProposer:
             "status": "allowed",
             "proposal_id": proposal_id,
             "tool_name": tool_name,
+            "tool_args": tool_args,
             "composite_score": score,
             "signals": signals,
             "commit_token": token.token,

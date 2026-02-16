@@ -3,6 +3,8 @@ import time
 
 from mcp_observatory.demo.server import DemoToolServer
 from mcp_observatory.proposal_commit.hashing import tool_args_hash
+from mcp_observatory.proposal_commit.proposer import ToolProposer
+from mcp_observatory.proposal_commit.storage import InMemoryStorage
 from mcp_observatory.proposal_commit.token import CommitTokenManager
 
 
@@ -40,13 +42,34 @@ def test_expired_token_rejected() -> None:
     assert verified.reason == "expired"
 
 
+def test_generic_proposer_supports_any_tool_name() -> None:
+    async def run() -> None:
+        storage = InMemoryStorage()
+        token_manager = CommitTokenManager(secret="unit-secret")
+        proposer = ToolProposer(storage=storage, token_manager=token_manager)
+
+        result = await proposer.propose(
+            tool_name="place_trade",
+            tool_args={"symbol": "AAPL", "qty": 2},
+            prompt="Place trade for AAPL qty 2",
+            candidate_output_a="Trade plan qty 2",
+            candidate_output_b="Trade plan qty 2",
+        )
+
+        assert result["tool_name"] == "place_trade"
+        assert result["status"] == "allowed"
+        assert "proposal_id" in result
+        assert "commit_token" in result
+
+    asyncio.run(run())
+
+
 def test_replay_protection_blocks_second_commit() -> None:
     async def run() -> None:
         server = DemoToolServer()
         try:
             proposal = await server.transfer_funds_propose(amount=100, to="acct_123")
             if proposal["status"] != "allowed":
-                # Ensure test remains deterministic if proposal score threshold changes.
                 return
 
             payload = {
