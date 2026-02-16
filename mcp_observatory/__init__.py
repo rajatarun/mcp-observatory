@@ -1,12 +1,10 @@
-"""MCP Observatory package.
+"""MCP Observatory package."""
 
-This package provides lightweight observability primitives for instrumenting
-Model Context Protocol (MCP) servers.
-"""
-
+from .core.interceptor import V2Config
 from .execution import TieredExecutionConfig, TieredExecutionEngine
 from .hallucination.config import HallucinationConfig
 from .instrument import instrument, instrument_mcp_server
+from .proposal_commit import CommitTokenManager, CommitVerifier, ProposalConfig, ToolProposer
 
 __all__ = [
     "instrument",
@@ -14,4 +12,9 @@ __all__ = [
     "HallucinationConfig",
     "TieredExecutionConfig",
     "TieredExecutionEngine",
+    "V2Config",
+    "CommitTokenManager",
+    "CommitVerifier",
+    "ProposalConfig",
+    "ToolProposer",
 ]
