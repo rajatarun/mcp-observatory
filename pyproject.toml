@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Observability and APM toolkit for MCP servers"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
   { name = "MCP Observatory Contributors" }
 ]
