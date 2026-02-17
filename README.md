@@ -115,3 +115,25 @@ PYTHONPATH=. pytest -q
 ```
 
 The suite includes tests for token verification, hash stability, replay protection, and expired-token rejection.
+
+## Real-World MCP Scenario Demo (10 End-to-End Flows)
+
+A realistic MCP server example is available at:
+
+- `mcp_observatory/demo/real_world_server.py`
+- executable shim: `examples/real_world_mcp_server.py`
+
+It includes:
+
+- 10 distinct prompts mapped to 10 different MCP tool handlers
+- per-invocation annotations (e.g. `destructiveHint`, `idempotentHint`, `openWorldHint`)
+- **proposal/commit** execution for HIGH-risk tools (no secondary-response gating)
+- irreversible actions never pass a secondary LLM response
+- simulated LLM responses and grounding summaries for standard-risk tools
+- deterministic fallback routing for blocked/review-required scenarios
+
+Run it:
+
+```bash
+python examples/real_world_mcp_server.py
+```
