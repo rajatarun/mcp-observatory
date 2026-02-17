@@ -115,3 +115,54 @@ PYTHONPATH=. pytest -q
 ```
 
 The suite includes tests for token verification, hash stability, replay protection, and expired-token rejection.
+
+## Real-World MCP Scenario Demo (10 End-to-End Flows)
+
+A realistic MCP server example is available at:
+
+- `mcp_observatory/demo/real_world_server.py`
+- executable shim: `examples/real_world_mcp_server.py`
+- executable client: `examples/real_world_mcp_client.py`
+- prompt-to-invocation MVP: `examples/prompt_to_mcp_invocation_mvp.py`
+- OpenAI GPT utility: `examples/openai_prompt_to_mcp_invocation.py`
+
+It includes:
+
+- 10 distinct prompts mapped to 10 different MCP tool handlers
+- per-invocation annotations (e.g. `destructiveHint`, `idempotentHint`, `openWorldHint`)
+- **proposal/commit** execution for HIGH-risk tools (no secondary-response gating)
+- irreversible actions never pass a secondary LLM response
+- simulated LLM responses and grounding summaries for standard-risk tools
+- deterministic fallback routing for blocked/review-required scenarios
+- prompt-to-invocation MVP now extracts required tool parameters from user prompts before server invocation
+- openai-gpt utility for service selection + parameter extraction + MCP invocation
+
+Run server demo:
+
+```bash
+python examples/real_world_mcp_server.py
+```
+
+Run client demo (client interacting with server):
+
+```bash
+python examples/real_world_mcp_client.py
+```
+
+Run prompt -> LLM planner -> server invocation MVP:
+
+```bash
+python examples/prompt_to_mcp_invocation_mvp.py
+```
+
+Run OpenAI GPT utility (manual, requires `OPENAI_API_KEY`):
+
+```bash
+python examples/openai_prompt_to_mcp_invocation.py
+```
+
+Optional (recommended): install OpenAI SDK for first-class client support (client auto-detects and uses SDK when available; otherwise it uses HTTPS fallback):
+
+```bash
+pip install -e .[openai]
+```
