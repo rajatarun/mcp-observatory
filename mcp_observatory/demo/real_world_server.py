@@ -300,25 +300,36 @@ class RealWorldMCPServer:
         )
         return {"execution_pattern": "single_step", "result": result}
 
+
+    def _scenario_lookup(self) -> dict[str, tuple[int, Scenario]]:
+        return {scenario.name: (index, scenario) for index, scenario in enumerate(build_real_world_scenarios(), start=1)}
+
+    async def list_scenarios(self) -> list[str]:
+        return list(self._scenario_lookup().keys())
+
+    async def execute_scenario_by_name(self, scenario_name: str) -> dict[str, Any]:
+        scenario_entry = self._scenario_lookup().get(scenario_name)
+        if scenario_entry is None:
+            return {"status": "not_found", "scenario": scenario_name}
+
+        scenario_index, scenario = scenario_entry
+        profile = DEFAULT_REGISTRY.get(scenario.tool_name)
+        if profile.criticality.value == "HIGH":
+            execution = await self._execute_high_risk(scenario=scenario)
+        else:
+            execution = await self._execute_standard_risk(scenario=scenario, index=scenario_index)
+
+        return {
+            "scenario": scenario.name,
+            "prompt": scenario.prompt,
+            "invocation_annotations": scenario.invocation_annotations,
+            **execution,
+        }
+
     async def run_end_to_end_scenarios(self) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        scenarios = build_real_world_scenarios()
-
-        for index, scenario in enumerate(scenarios, start=1):
-            profile = DEFAULT_REGISTRY.get(scenario.tool_name)
-            if profile.criticality.value == "HIGH":
-                execution = await self._execute_high_risk(scenario=scenario)
-            else:
-                execution = await self._execute_standard_risk(scenario=scenario, index=index)
-
-            results.append(
-                {
-                    "scenario": scenario.name,
-                    "prompt": scenario.prompt,
-                    "invocation_annotations": scenario.invocation_annotations,
-                    **execution,
-                }
-            )
+        for scenario_name in await self.list_scenarios():
+            results.append(await self.execute_scenario_by_name(scenario_name))
         return results
 
 
