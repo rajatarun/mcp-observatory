@@ -123,6 +123,7 @@ A realistic MCP server example is available at:
 - `mcp_observatory/demo/real_world_server.py`
 - executable shim: `examples/real_world_mcp_server.py`
 - executable client: `examples/real_world_mcp_client.py`
+- prompt-to-invocation MVP: `examples/prompt_to_mcp_invocation_mvp.py`
 
 It includes:
 
@@ -143,4 +144,10 @@ Run client demo (client interacting with server):
 
 ```bash
 python examples/real_world_mcp_client.py
+```
+
+Run prompt -> LLM planner -> server invocation MVP:
+
+```bash
+python examples/prompt_to_mcp_invocation_mvp.py
 ```
