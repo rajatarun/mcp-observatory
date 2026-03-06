@@ -46,6 +46,11 @@ Client
 - `mcp_observatory/proposal_commit/storage.py`
   - in-memory storage fallback
   - optional Postgres storage via `asyncpg`
+- `mcp_observatory/core/wrapper_api.py`
+  - generic `InvocationWrapperAPI` for wrapping either `agent` or `model` invocations
+  - captures input/output hashes, token/cost metrics, and emits `allow/review/block` decisions
+- `mcp_observatory/instrument.py`
+  - adds `instrument_wrapper_api(...)` helper for fast wrapper setup
 - `mcp_observatory/demo/server.py`
   - MCP-like tools:
     - `transfer_funds_propose`
@@ -166,3 +171,34 @@ Optional (recommended): install OpenAI SDK for first-class client support (clien
 ```bash
 pip install -e .[openai]
 ```
+
+
+## Wrapper API (Agent or Model Invocation)
+
+Use the wrapper to route either agent-side orchestration calls or direct model calls through a single observability envelope.
+
+```python
+from mcp_observatory.instrument import instrument_wrapper_api
+
+wrapper = instrument_wrapper_api("my-service")
+
+result = await wrapper.invoke(
+    source="agent",
+    model="gpt-4o-mini",
+    prompt="Generate deployment plan",
+    input_payload={"request_id": "abc123", "task": "deployment_plan"},
+    call=lambda: {"plan": "blue-green rollout"},
+)
+
+print(result.decision.action)  # allow/review/block
+print(result.span.cost_usd)
+```
+
+Dual-run measurement is supported with `dual_invoke=True` and shadow parameters (`shadow_source`, `shadow_model`, `shadow_agent_params`, `shadow_model_params`, and `shadow_call`) to compare alternate execution paths and capture disagreement metrics.
+
+The wrapper output (`WrapperResult`) includes:
+
+- `output`: raw callable output
+- `span`: captured telemetry metrics (tokens, cost, hashes, timing)
+- `decision`: policy decision suitable for downstream execution routing
+- `shadow_output` and `shadow_span` (when `dual_invoke=True`) with comparison metrics on primary span (`shadow_disagreement_score`, `shadow_numeric_variance`)
