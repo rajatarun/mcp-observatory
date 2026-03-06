@@ -6,6 +6,7 @@ from typing import Optional
 
 from .core.interceptor import MCPInterceptor, V2Config
 from .core.tracer import Tracer
+from .core.wrapper_api import InvocationWrapperAPI, WrapperPolicy
 from .exporters.base import Exporter
 from .fallback.router import FallbackRouter
 from .hallucination.config import HallucinationConfig
@@ -43,6 +44,16 @@ def instrument(
         fallback_router=fallback_router,
         v2_config=v2_config,
     )
+
+
+def instrument_wrapper_api(
+    service_name: str,
+    *,
+    exporter: Optional[Exporter] = None,
+    policy: Optional[WrapperPolicy] = None,
+) -> InvocationWrapperAPI:
+    """Create the generic wrapper API for agent/model invocation telemetry."""
+    return InvocationWrapperAPI(tracer=Tracer(service=service_name), exporter=exporter, policy=policy)
 
 
 instrument_mcp_server = instrument
