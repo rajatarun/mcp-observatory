@@ -10,6 +10,16 @@ from typing import Any, Awaitable, Callable, Optional
 from ..cost.pricing import estimate_cost
 from ..cost.tokenizer import estimate_tokens
 from ..exporters.base import Exporter
+from ..hallucination.scoring import compute_hallucination_risk_score, risk_level_for_score
+from ..hallucination.signals import (
+    LocalHeuristicVerifier,
+    compute_grounding_score,
+    compute_numeric_variance_score,
+    compute_self_consistency_score,
+    detect_tool_claim_mismatch,
+)
+from ..risk import scoring as risk_scoring
+from ..risk import signals as risk_signals
 from .context import TraceContext
 from .tracer import Tracer
 
@@ -106,6 +116,9 @@ class InvocationWrapperAPI:
         shadow_call_kwargs: Optional[dict[str, Any]] = None,
         shadow_agent_params: Optional[dict[str, Any]] = None,
         shadow_model_params: Optional[dict[str, Any]] = None,
+        retrieved_context: Optional[str] = None,
+        tool_result_summary: Optional[str] = None,
+        previous_prompt_hash: Optional[str] = None,
         **call_kwargs: Any,
     ) -> WrapperResult:
         """Invoke any callable through the observability wrapper.
@@ -160,6 +173,16 @@ class InvocationWrapperAPI:
             span.shadow_disagreement_score = _disagreement_score(output, shadow_output)
             span.shadow_numeric_variance = _numeric_variance(output, shadow_output)
 
+        await self._populate_metrics(
+            span=span,
+            output=output,
+            prompt=prompt,
+            secondary_output=shadow_output,
+            retrieved_context=retrieved_context,
+            tool_result_summary=tool_result_summary,
+            previous_prompt_hash=previous_prompt_hash,
+        )
+
         decision = self._decide(span=span, output=output)
         span.policy_decision = decision.action
         if decision.reason:
@@ -175,6 +198,64 @@ class InvocationWrapperAPI:
             shadow_output=shadow_output,
             shadow_span=shadow_span,
         )
+
+    async def _populate_metrics(
+        self,
+        *,
+        span: TraceContext,
+        output: Any,
+        prompt: str,
+        secondary_output: Any = None,
+        retrieved_context: Optional[str] = None,
+        tool_result_summary: Optional[str] = None,
+        previous_prompt_hash: Optional[str] = None,
+    ) -> None:
+        """Compute and populate all hallucination and risk metrics on the span."""
+        answer = _to_text(output)
+        secondary_answer: Optional[str] = _to_text(secondary_output) if secondary_output is not None else None
+
+        # --- Hallucination signals ---
+        span.grounding_score = compute_grounding_score(answer, retrieved_context)
+        span.self_consistency_score = compute_self_consistency_score(answer, secondary_answer)
+        span.numeric_variance_score = compute_numeric_variance_score(answer, secondary_answer)
+        span.tool_claim_mismatch = detect_tool_claim_mismatch(answer, tool_result_summary)
+
+        verifier_score, _ = await LocalHeuristicVerifier().score(prompt, answer, retrieved_context)
+        span.verifier_score = verifier_score
+
+        # --- Hallucination composite ---
+        span.hallucination_risk_score = compute_hallucination_risk_score(
+            grounding_score=span.grounding_score,
+            self_consistency_score=span.self_consistency_score,
+            verifier_score=span.verifier_score,
+            numeric_variance_score=span.numeric_variance_score,
+            tool_claim_mismatch=span.tool_claim_mismatch,
+        )
+        span.hallucination_risk_level = risk_level_for_score(span.hallucination_risk_score)
+
+        # --- Risk signals ---
+        span.drift_risk = risk_signals.drift_risk(
+            previous_prompt_hash=previous_prompt_hash,
+            current_prompt_hash=span.prompt_hash or "",
+        )
+        span.grounding_risk = risk_signals.grounding_risk(answer, retrieved_context)
+        span.self_consistency_risk = risk_signals.self_consistency_risk(answer, secondary_answer)
+        span.numeric_instability_risk = risk_signals.numeric_instability_risk(answer, secondary_answer)
+        span.tool_mismatch_risk = risk_signals.tool_mismatch_risk(answer, tool_result_summary)
+
+        low_grounding = span.grounding_score is not None and span.grounding_score < 0.10
+        _verifier_risk = risk_signals.verifier_risk(answer, low_grounding=low_grounding)
+
+        # --- Composite risk ---
+        components = {
+            "grounding_risk": span.grounding_risk,
+            "self_consistency_risk": span.self_consistency_risk,
+            "verifier_risk": _verifier_risk,
+            "numeric_instability_risk": span.numeric_instability_risk,
+            "tool_mismatch_risk": span.tool_mismatch_risk,
+            "drift_risk": span.drift_risk,
+        }
+        span.composite_risk_score, span.composite_risk_level = risk_scoring.composite_risk_score(components)
 
     async def _execute_with_span(
         self,
