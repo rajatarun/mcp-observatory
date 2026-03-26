@@ -29,7 +29,20 @@ DecisionCallable = Callable[[TraceContext, Any], "WrapperDecision"]
 
 @dataclass(frozen=True)
 class WrapperDecision:
-    """Decision envelope emitted by wrapper policy evaluation."""
+    """Decision envelope emitted by wrapper policy evaluation.
+
+    Attributes:
+        action: Outcome directive. One of:
+            - ``"allow"``  — output is within all budgets; proceed normally.
+            - ``"review"`` — a budget threshold was exceeded; human review recommended.
+            - ``"block"``  — output is empty or otherwise unusable; discard it.
+        reason: Machine-readable cause for the decision. Common values:
+            ``"within_budget"``, ``"empty_output"``, ``"cost_budget_exceeded"``,
+            ``"latency_budget_exceeded"``.  ``None`` when no reason applies.
+        metadata: Supplementary key/value data explaining the decision.
+            Populated only for ``"review"`` actions, e.g.
+            ``{"cost_usd": 0.31, "max_cost_usd": 0.25}``.
+    """
 
     action: str
     reason: Optional[str] = None
@@ -38,7 +51,16 @@ class WrapperDecision:
 
 @dataclass(frozen=True)
 class WrapperPolicy:
-    """Simple threshold policy for wrapper output decisioning."""
+    """Simple threshold policy for wrapper output decisioning.
+
+    Attributes:
+        max_cost_usd: Maximum acceptable cost in USD per invocation.
+            Invocations that exceed this value receive a ``"review"`` decision.
+            Default: ``0.25``.
+        max_latency_ms: Maximum acceptable wall-clock latency in milliseconds.
+            Invocations that exceed this value receive a ``"review"`` decision.
+            Default: ``8000.0``.
+    """
 
     max_cost_usd: float = 0.25
     max_latency_ms: float = 8_000.0
@@ -69,7 +91,59 @@ class WrapperPolicy:
 
 @dataclass(frozen=True)
 class WrapperResult:
-    """Structured wrapper output with metrics and policy decision."""
+    """Structured wrapper output with metrics and policy decision.
+
+    Attributes:
+        output: Raw return value from the primary ``call`` callable.
+        span: Completed :class:`TraceContext` for the primary invocation.
+            The span carries all computed metrics after ``invoke()`` returns:
+
+            *Telemetry*
+              ``prompt_tokens``, ``completion_tokens``, ``cost_usd``,
+              ``prompt_hash``, ``normalized_prompt_hash``, ``answer_hash``,
+              ``tool_args_hash``, ``prompt_size_chars``, ``method``,
+              ``is_shadow``, ``start_time``, ``end_time``.
+
+            *Hallucination signals*
+              ``grounding_score`` — Jaccard overlap between answer and
+              retrieved context (``None`` if no context supplied).
+              ``self_consistency_score`` — token-overlap between primary and
+              shadow answer (``None`` if no shadow).
+              ``numeric_variance_score`` — relative numeric drift between
+              primary and shadow answer (or internal spread if no shadow).
+              ``tool_claim_mismatch`` — ``True`` when the model claims success
+              but the tool result indicates failure (``None`` if no tool summary).
+              ``verifier_score`` — local heuristic goodness score in [0, 1].
+
+            *Hallucination composite*
+              ``hallucination_risk_score`` — weighted composite in [0, 1].
+              ``hallucination_risk_level`` — ``"low"`` / ``"medium"`` / ``"high"``.
+
+            *Risk signals*
+              ``drift_risk`` — ``1.0`` if prompt hash changed, else ``0.0``.
+              ``grounding_risk`` — inverse grounding overlap in [0, 1].
+              ``self_consistency_risk`` — inverse consistency in [0, 1].
+              ``numeric_instability_risk`` — numeric drift in [0, 1].
+              ``tool_mismatch_risk`` — ``1.0`` on tool/answer mismatch, else ``0.0``.
+
+            *Risk composite*
+              ``composite_risk_score`` — renormalised weighted composite in [0, 1].
+              ``composite_risk_level`` — ``"low"`` / ``"medium"`` / ``"high"``.
+
+            *Shadow comparison* (set only when ``dual_invoke=True``)
+              ``shadow_disagreement_score`` — Jaccard-based token disagreement.
+              ``shadow_numeric_variance`` — mean absolute numeric delta.
+
+            *Policy*
+              ``policy_decision`` — mirrors ``decision.action``.
+              ``fallback_reason`` — mirrors ``decision.reason``.
+
+        decision: :class:`WrapperDecision` produced by the active policy.
+        shadow_output: Raw return value from the shadow ``call`` callable, or
+            ``None`` when ``dual_invoke=False``.
+        shadow_span: Completed :class:`TraceContext` for the shadow invocation,
+            or ``None`` when ``dual_invoke=False``.
+    """
 
     output: Any
     span: TraceContext
@@ -84,6 +158,18 @@ class InvocationWrapperAPI:
     This API accepts either an *agent* or *model* source invocation,
     records telemetry metrics in a trace span, and emits a policy decision
     that can be consumed by downstream execution logic.
+
+    Args:
+        tracer: :class:`~mcp_observatory.core.tracer.Tracer` used to create
+            and finish trace spans.
+        exporter: Optional :class:`~mcp_observatory.exporters.base.Exporter`
+            that receives the completed span after each invocation.
+        policy: :class:`WrapperPolicy` that decides whether to allow, review,
+            or block the output based on cost/latency budgets.  Defaults to
+            ``WrapperPolicy()`` with 0.25 USD and 8 000 ms limits.
+        decision_fn: Custom callable with signature
+            ``(span: TraceContext, output: Any) -> WrapperDecision`` that
+            overrides ``policy`` entirely when provided.
     """
 
     def __init__(
@@ -123,22 +209,69 @@ class InvocationWrapperAPI:
     ) -> WrapperResult:
         """Invoke any callable through the observability wrapper.
 
+        Executes ``call(**call_kwargs)``, records a telemetry span, computes
+        all hallucination and risk metrics, applies the active policy, and
+        returns a :class:`WrapperResult` containing the raw output, the
+        populated span, and the policy decision.
+
         Args:
-            source: Invocation source, usually ``"agent"`` or ``"model"``.
-            model: Logical model identifier used for token/cost estimation.
-            prompt: Prompt or request text.
-            input_payload: Structured request payload to hash/store in span.
-            call: Sync or async callable to execute.
-            dual_invoke: When ``True``, execute a second shadow invocation for comparison.
-            shadow_source: Shadow invocation source; defaults to primary source.
-            shadow_model: Shadow model; defaults to primary model.
-            shadow_prompt: Shadow prompt; defaults to primary prompt.
-            shadow_input_payload: Shadow payload; defaults to primary payload.
-            shadow_call: Shadow callable; defaults to primary callable.
-            shadow_call_kwargs: Shadow callable kwargs; defaults to primary kwargs.
-            shadow_agent_params: Optional shadow-agent parameter envelope for measurement.
-            shadow_model_params: Optional shadow-model parameter envelope for measurement.
-            **call_kwargs: Arguments forwarded to ``call``.
+            source: Invocation source label stored on the span method field,
+                e.g. ``"agent"`` or ``"model"``.
+            model: Logical model identifier used for token and cost estimation
+                (e.g. ``"gpt-4o"``).
+            prompt: Full prompt or request text sent to the model/agent.
+                Used for token estimation, hashing, and verifier scoring.
+            input_payload: Structured request payload (dict, list, or string).
+                Hashed and stored on the span; not forwarded to ``call``.
+            call: Sync or async callable to execute.  Receives ``**call_kwargs``
+                as keyword arguments.
+            dual_invoke: When ``True``, execute a second *shadow* invocation
+                immediately after the primary one.  The shadow output is used
+                as the secondary answer for self-consistency and numeric
+                variance metrics.  Default: ``False``.
+            shadow_source: Source label for the shadow span.
+                Defaults to ``source``.
+            shadow_model: Model identifier for the shadow invocation.
+                Defaults to ``model``.
+            shadow_prompt: Prompt for the shadow invocation.
+                Defaults to ``prompt``.
+            shadow_input_payload: Payload for the shadow invocation.
+                Defaults to ``input_payload`` (or the merged agent/model params
+                dict when ``shadow_agent_params`` / ``shadow_model_params`` are
+                provided).
+            shadow_call: Callable for the shadow invocation.
+                Defaults to ``call``.
+            shadow_call_kwargs: Keyword arguments forwarded to ``shadow_call``.
+                Defaults to the primary ``call_kwargs``.
+            shadow_agent_params: Agent parameter envelope used to build the
+                shadow payload when ``shadow_input_payload`` is not supplied.
+            shadow_model_params: Model parameter envelope used to build the
+                shadow payload when ``shadow_input_payload`` is not supplied.
+            retrieved_context: Optional text retrieved from a knowledge source
+                (e.g. RAG context).  Used to compute ``grounding_score`` and
+                ``grounding_risk`` on the span.
+            tool_result_summary: Optional string summarising tool execution
+                results.  Used to detect ``tool_claim_mismatch`` and compute
+                ``tool_mismatch_risk``.
+            previous_prompt_hash: SHA-256 hex digest of the previous
+                invocation's prompt (as returned in ``span.prompt_hash``).
+                Used to compute ``drift_risk``; omit for the first call in a
+                session.
+            **call_kwargs: Additional keyword arguments forwarded verbatim to
+                ``call``.
+
+        Returns:
+            :class:`WrapperResult` with the following fields populated:
+
+            - ``output`` — raw return value of ``call``.
+            - ``span`` — completed :class:`TraceContext` with all telemetry,
+              hallucination signals, risk signals, and composite scores.
+            - ``decision`` — :class:`WrapperDecision` with ``action``,
+              ``reason``, and optional ``metadata``.
+            - ``shadow_output`` — raw return value of the shadow callable
+              (``None`` if ``dual_invoke=False``).
+            - ``shadow_span`` — completed :class:`TraceContext` for the shadow
+              invocation (``None`` if ``dual_invoke=False``).
         """
         output, span = await self._execute_with_span(
             source=source,
