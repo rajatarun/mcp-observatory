@@ -1,5 +1,5 @@
 {
-  "name": "mcp-observatory",
+  "name": "@weaveaijs/mcp-observatory",
   "version": "0.3.0",
   "description": "Observability and APM toolkit for MCP servers",
   "type": "module",
@@ -11,6 +11,32 @@
   ],
   "engines": {
     "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rajatarun/mcp-observatory.git",
+    "directory": ".",
+    "branch": "main-nodejs"
+  },
+  "bugs": {
+    "url": "https://github.com/rajatarun/mcp-observatory/issues"
+  },
+  "homepage": "https://github.com/rajatarun/mcp-observatory#readme",
+  "keywords": [
+    "mcp",
+    "observability",
+    "apm",
+    "tracer",
+    "span",
+    "proposal-commit",
+    "risk-scoring",
+    "hallucination-detection"
+  ],
+  "author": "WeaveAI",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "scripts": {
     "build": "tsc",
