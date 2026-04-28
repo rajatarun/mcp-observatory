@@ -1,0 +1,135 @@
+name: Publish to npm (@weaveaijs)
+
+on:
+  push:
+    branches:
+      - main-nodejs
+    paths:
+      - 'package.json'
+      - 'src/**'
+      - '.github/workflows/publish.yml'
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test
+
+      - name: Check build artifacts
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Build failed: dist directory not found"
+            exit 1
+          fi
+          if [ ! -f "dist/index.js" ]; then
+            echo "Build failed: dist/index.js not found"
+            exit 1
+          fi
+
+  publish:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main-nodejs' && github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Get version from package.json
+        id: package-version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
+
+      - name: Check if version already published
+        id: check-version
+        continue-on-error: true
+        run: |
+          npm view @weaveaijs/mcp-observatory@${{ steps.package-version.outputs.version }} > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "Version already published, skipping..."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to npm
+        if: steps.check-version.outputs.skip != 'true'
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create Release
+        if: steps.check-version.outputs.skip != 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          release_name: Release v${{ steps.package-version.outputs.version }}
+          body: |
+            # MCP Observatory Node.js v${{ steps.package-version.outputs.version }}
+
+            Published to npm: [@weaveaijs/mcp-observatory](https://www.npmjs.com/package/@weaveaijs/mcp-observatory)
+
+            ## What's included
+            - Core tracer and span model
+            - Two-phase proposal/commit pattern
+            - Risk and hallucination scoring
+            - Cost tracking with token estimation
+            - PostgreSQL storage backend
+            - Comprehensive test suite
+
+            ## Installation
+            ```bash
+            npm install @weaveaijs/mcp-observatory
+            ```
+
+            ## Repository
+            - Branch: `main-nodejs`
+            - Commit: `${{ github.sha }}`
+          draft: false
+          prerelease: false
+
+      - name: Publish notification
+        if: steps.check-version.outputs.skip != 'true'
+        run: |
+          echo "✅ Successfully published @weaveaijs/mcp-observatory@${{ steps.package-version.outputs.version }}"
+          echo "📦 npm: https://www.npmjs.com/package/@weaveaijs/mcp-observatory"
+          echo "📚 Documentation: https://github.com/rajatarun/mcp-observatory/blob/main-nodejs/README.md"
