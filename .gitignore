@@ -1,2 +1,10 @@
-__pycache__/
-*.py[cod]
+node_modules/
+dist/
+*.js
+*.d.ts
+*.map
+.env
+.env.local
+.DS_Store
+*.log
+coverage/
