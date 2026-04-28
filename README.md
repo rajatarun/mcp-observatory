@@ -1,322 +1,204 @@
-# MCP Observatory - Node.js Edition
+# MCP Observatory
 
-A modern TypeScript/Node.js implementation of an observability and APM toolkit for MCP (Model Context Protocol) servers, featuring a two-phase execution pattern for high-risk tool calls.
+MCP Observatory now includes a **two-phase execution pattern** for high-risk MCP tool calls, with a generic proposer/verifier wrapper that can be reused by any tool:
 
-## Overview
+1. **PROPOSE**: plan/simulate, evaluate uncertainty/integrity, no side effects.
+2. **COMMIT**: execute side effects only when a signed commit token is valid.
 
-MCP Observatory provides:
+## Two-Phase Sequence (Text Diagram)
 
-1. **Tracer & Observability**: Track spans, tokens, costs, and latency for every operation
-2. **Proposal/Commit Pattern**: Two-phase execution for high-risk operations with deterministic fallbacks
-3. **Risk Assessment**: Hallucination scoring, tool risk categorization, and numeric variance detection
-4. **Cost Tracking**: Token estimation and model-aware pricing for various AI providers
-5. **Storage Options**: In-memory or PostgreSQL-backed proposal/commit storage
+```text
+Client
+  -> transfer_funds_propose(amount,to)
+      -> scoring(output_instability, numeric_variance, prompt_drift)
+      -> decision:
+          - blocked: deterministic fallback (create_draft), no side effects
+          - allowed: issue signed commit_token bound to tool args hash
+  <- {proposal_id, commit_token?}
 
-## Architecture
-
-```
-┌─ Core Layer
-│  ├─ Tracer: Span creation and lifecycle management
-│  ├─ TraceContext: Span data model with metrics
-│  └─ InvocationWrapper: Policy-driven execution wrapper
-│
-├─ Proposal/Commit Layer
-│  ├─ ToolProposer: Risk scoring and proposal generation
-│  ├─ TokenManager: HMAC-signed token issue/verify
-│  ├─ CommitVerifier: Multi-stage verification with replay protection
-│  └─ Storage: In-memory or PostgreSQL backends
-│
-├─ Assessment Layer
-│  ├─ Hallucination Scoring: Output instability, grounding, variance
-│  ├─ Risk Scoring: Tool classification by destructiveness/scope
-│  └─ Hashing: Stable canonical JSON and prompt normalization
-│
-└─ Demo Layer
-   ├─ MCPServer: Example server with propose/commit handlers
-   └─ MCPClient: Example client with dual-measurement support
+Client
+  -> transfer_funds_commit(proposal_id, commit_token, amount, to)
+      -> verify signature + expiry + proposal existence + args_hash binding + nonce replay
+      -> if valid: perform side effect (funds transfer)
+      -> else: block with explicit reason
+  <- commit outcome
 ```
 
-## Quick Start
+## New Modules
 
-### Installation
+- `mcp_observatory/proposal_commit/hashing.py`
+  - canonical JSON hashing for stable `tool_args_hash`
+  - normalized `prompt_hash`
+- `mcp_observatory/proposal_commit/scoring.py`
+  - `output_instability = 1 - jaccard_similarity`
+  - `numeric_variance` from extracted numbers
+  - `prompt_drift` from prompt hash vs baseline
+  - weighted renormalized `composite_score`
+  - demo `model_generate(prompt, temperature)` stub
+- `mcp_observatory/proposal_commit/token.py`
+  - HMAC-SHA256 token issue/verify
+  - payload fields: `token_id, proposal_id, tool_name, tool_args_hash, issued_at, expires_at, nonce, composite_score`
+- `mcp_observatory/proposal_commit/proposer.py`
+  - generic `ToolProposer.propose(...)` for any tool name/args
+  - deterministic blocked fallback
+- `mcp_observatory/proposal_commit/verifier.py`
+  - commit verification and nonce replay protection
+- `mcp_observatory/proposal_commit/storage.py`
+  - in-memory storage fallback
+  - optional Postgres storage via `asyncpg`
+- `mcp_observatory/core/wrapper_api.py`
+  - generic `InvocationWrapperAPI` for wrapping either `agent` or `model` invocations
+  - captures input/output hashes, token/cost metrics, and emits `allow/review/block` decisions
+- `mcp_observatory/instrument.py`
+  - adds `instrument_wrapper_api(...)` helper for fast wrapper setup
+- `mcp_observatory/demo/server.py`
+  - MCP-like tools:
+    - `transfer_funds_propose`
+    - `transfer_funds_commit`
+- `mcp_observatory/demo/run_demo.py`
+  - propose -> commit -> replay-attempt demo
+- `sql/schema.sql`
+  - Postgres tables: `proposals`, `commits`, `nonces`, `tool_prompt_baselines`
 
-```bash
-npm install
-npm run build
-```
+## Security / Verification Rules
 
-### Running the Demo
+Commit verifies all of the following:
 
-```bash
-# Without database
-npm run demo
+- token signature is valid (`bad_signature` on failure)
+- token not expired (`expired`)
+- proposal exists and was allowed (`unknown_proposal`)
+- commit args hash equals token payload args hash (`args_hash_mismatch`)
+- nonce has not already been used (`nonce_replay`)
 
-# With PostgreSQL (optional)
-export MCP_OBSERVATORY_PG_DSN='postgresql://user:pass@localhost:5432/postgres'
-psql "$MCP_OBSERVATORY_PG_DSN" -f sql/schema.sql
-npm run demo
-```
+## Deterministic Fallback on Proposal Block
 
-### Running Tests
+Blocked proposal response is deterministic and side-effect free:
 
-```bash
-npm test
-```
-
-## Core Concepts
-
-### Spans & Tracing
-
-Track execution metrics for any operation:
-
-```typescript
-import { Tracer } from 'mcp-observatory';
-
-const tracer = new Tracer('my-service');
-
-await tracer.withSpan(async (span) => {
-  span.inputTokens = 150;
-  span.outputTokens = 250;
-  span.costUsd = 0.0045;
-  
-  // Your async operation here
-}, { model: 'gpt-4o' });
-```
-
-### Two-Phase Execution
-
-For high-risk operations, use propose/commit pattern:
-
-```typescript
-import { ToolProposer, CommitVerifier } from 'mcp-observatory';
-
-const proposer = new ToolProposer();
-const verifier = new CommitVerifier();
-
-// Phase 1: Propose (no side effects)
-const proposal = await proposer.propose({
-  toolName: 'transfer_funds',
-  toolArgs: { amount: 1000, to: 'account_456' },
-  outputInstability: 0.3,
-});
-
-// Response includes commit token
-console.log(proposal.status); // 'allowed' | 'blocked' | 'review'
-
-// Phase 2: Commit (only if proposal token is valid)
-if (proposal.commitToken) {
-  const verification = verifier.verify({
-    token: proposal.commitToken,
-    proposalId: proposal.proposalId,
-    toolName: 'transfer_funds',
-    toolArgs: { amount: 1000, to: 'account_456' },
-  });
-
-  if (verification.canExecute) {
-    // Execute the operation
-  }
+```json
+{
+  "status": "blocked",
+  "action": "create_draft",
+  "reason": "low_integrity",
+  "draft": {"tool": "transfer_funds", "amount": 100, "to": "acct_123"}
 }
 ```
 
-### Risk Assessment
+## Running the Demo
 
-Compute composite risk scores from multiple signals:
+### Without Postgres (default)
 
-```typescript
-import {
-  computeHallucinationRiskScore,
-  computeRiskScore,
-  categorizeRisk,
-} from 'mcp-observatory';
+No env vars needed; in-memory store is used.
 
-// Hallucination risk
-const hallucScore = computeHallucinationRiskScore({
-  outputInstability: 0.4,
-  groundingScore: 0.7,
-  numericVarianceScore: 0.1,
-  selfConsistencyScore: 0.9,
-  toolClaimMismatch: false,
-});
-
-// Tool risk categorization
-const signals = categorizeRisk('delete_user', {});
-const riskScore = computeRiskScore(signals);
+```bash
+python -m mcp_observatory.demo.run_demo
 ```
 
-### Cost Tracking
+### With Postgres
 
-Estimate tokens and costs across models:
+1. Set DSN:
 
-```typescript
-import { estimateTokens, estimateCost, getPricing } from 'mcp-observatory';
-
-const text = 'Generate a deployment plan';
-const tokens = estimateTokens(text, 'gpt-4o');
-const cost = estimateCost(tokens, 'gpt-4o', 'model');
-
-console.log(`Tokens: ${tokens}, Cost: $${cost.toFixed(4)}`);
+```bash
+export MCP_OBSERVATORY_PG_DSN='postgresql://user:pass@localhost:5432/postgres'
 ```
 
-## Advanced Features
+2. Apply schema:
 
-### Dual Measurement (Shadow Runs)
-
-Compare two execution paths:
-
-```typescript
-import { InvocationWrapper } from 'mcp-observatory';
-
-const wrapper = new InvocationWrapper('my-service');
-
-const result = await wrapper.invoke({
-  source: 'agent',
-  model: 'gpt-4o',
-  prompt: 'Analyze this request',
-  call: () => primaryCall(),
-  dualInvoke: true,
-  shadowCall: () => shadowCall(),
-});
-
-console.log(`Primary cost: $${result.span.costUsd}`);
-console.log(`Shadow cost: $${result.shadowSpan?.costUsd}`);
+```bash
+psql "$MCP_OBSERVATORY_PG_DSN" -f sql/schema.sql
 ```
 
-### Storage Options
+3. Run demo:
 
-#### In-Memory (Default)
-
-```typescript
-import { InMemoryProposalStorage } from 'mcp-observatory';
-
-const storage = new InMemoryProposalStorage();
+```bash
+python -m mcp_observatory.demo.run_demo
 ```
-
-#### PostgreSQL
-
-```typescript
-import { PostgresProposalStorage } from 'mcp-observatory';
-
-const storage = new PostgresProposalStorage(
-  process.env.MCP_OBSERVATORY_PG_DSN!
-);
-
-// Later
-await storage.close();
-```
-
-## Module Reference
-
-### Core (`src/core`)
-
-- **`tracer.ts`**: Span creation and lifecycle
-- **`context.ts`**: TraceContext data model with metrics
-- **`wrapper.ts`**: InvocationWrapper with policy decisioning
-
-### Proposal/Commit (`src/proposal`)
-
-- **`token.ts`**: TokenManager for HMAC-signed token issue/verify
-- **`proposer.ts`**: ToolProposer with risk-based decisioning
-- **`verifier.ts`**: CommitVerifier with replay protection
-- **`storage.ts`**: In-memory and PostgreSQL storage backends
-
-### Assessment (`src/hallucination`, `src/risk`)
-
-- **`scoring.ts`** (hallucination): Risk scoring from instability, grounding, variance
-- **`scoring.ts`** (risk): Tool risk categorization by destructiveness/scope
-
-### Utilities (`src/utils`, `src/cost`)
-
-- **`hashing.ts`**: Stable canonical JSON and prompt normalization
-- **`time.ts`**: Time utilities
-- **`tokenizer.ts`**: Token estimation with model-specific limits
-- **`pricing.ts`**: Cost estimation for GPT and Claude models
-
-### Demo (`src/demo`)
-
-- **`server.ts`**: Example MCP server with propose/commit handlers
-- **`client.ts`**: Example client with dual-measurement support
 
 ## Testing
 
 ```bash
-npm test
+PYTHONPATH=. pytest -q
 ```
 
-Tests include:
+The suite includes tests for token verification, hash stability, replay protection, and expired-token rejection.
 
-- Tracer span creation and inheritance
-- Token issuance, verification, and expiry
-- Proposal scoring and status determination
-- Hash stability and prompt normalization
-- Risk and hallucination scoring
+## Real-World MCP Scenario Demo (10 End-to-End Flows)
 
-## API Endpoints (Demo Server)
+A realistic MCP server example is available at:
 
-The demo server exposes:
+- `mcp_observatory/demo/real_world_server.py`
+- executable shim: `examples/real_world_mcp_server.py`
+- executable client: `examples/real_world_mcp_client.py`
+- prompt-to-invocation MVP: `examples/prompt_to_mcp_invocation_mvp.py`
+- OpenAI GPT utility: `examples/openai_prompt_to_mcp_invocation.py`
 
-- `transfer_funds_propose(amount, to)` → {proposalId, status, commitToken?}
-- `transfer_funds_commit(proposalId, commitToken, amount, to)` → {success, transactionId?}
+It includes:
 
-## Security Rules
+- 10 distinct prompts mapped to 10 different MCP tool handlers
+- per-invocation annotations (e.g. `destructiveHint`, `idempotentHint`, `openWorldHint`)
+- **proposal/commit** execution for HIGH-risk tools (no secondary-response gating)
+- irreversible actions never pass a secondary LLM response
+- simulated LLM responses and grounding summaries for standard-risk tools
+- deterministic fallback routing for blocked/review-required scenarios
+- prompt-to-invocation MVP now extracts required tool parameters from user prompts before server invocation
+- openai-gpt utility for service selection + parameter extraction + MCP invocation
 
-Commit verification enforces:
-
-1. ✅ Token signature is valid
-2. ✅ Token not expired (5-minute default)
-3. ✅ Proposal exists and matches proposal_id
-4. ✅ Tool name matches token payload
-5. ✅ Args hash matches token payload (prevents tampering)
-6. ✅ Nonce not already used (replay protection)
-
-## Database Setup (Optional)
-
-Apply schema to existing PostgreSQL database:
+Run server demo:
 
 ```bash
-export MCP_OBSERVATORY_PG_DSN='postgresql://user:pass@localhost:5432/postgres'
-psql "$MCP_OBSERVATORY_PG_DSN" -f sql/schema.sql
+python examples/real_world_mcp_server.py
 ```
 
-Schema includes:
-
-- `proposals`: Proposal records with status and expiration
-- `commits`: Execution tracking with timestamps
-- `nonces`: Used nonces for replay prevention
-- `tool_prompt_baselines`: Prompt drift baseline storage
-- `traces`: Full execution traces with span hierarchy
-- `cleanup_expired_proposals()`: Automated cleanup function
-
-## Environment Variables
-
-- `MCP_OBSERVATORY_PG_DSN`: PostgreSQL connection string (optional)
-- `NODE_ENV`: Set to `production` for optimized builds
-
-## Build & Development
+Run client demo (client interacting with server):
 
 ```bash
-npm run build      # Compile TypeScript
-npm run dev        # Watch mode
-npm run lint       # Lint with ESLint
-npm test           # Run tests
-npm run demo       # Run demo
+python examples/real_world_mcp_client.py
 ```
 
-## License
+Run prompt -> LLM planner -> server invocation MVP:
 
-Apache License 2.0 (see LICENSE file)
+```bash
+python examples/prompt_to_mcp_invocation_mvp.py
+```
 
-## Architecture Preservation
+Run OpenAI GPT utility (manual, requires `OPENAI_API_KEY`):
 
-This Node.js rewrite preserves the original Python architecture:
+```bash
+python examples/openai_prompt_to_mcp_invocation.py
+```
 
-- ✅ Core tracer and span model
-- ✅ Two-phase proposal/commit pattern
-- ✅ HMAC-signed token verification
-- ✅ Multi-stage risk scoring
-- ✅ Storage abstraction (in-memory + PostgreSQL)
-- ✅ Hallucination detection signals
-- ✅ Cost and token tracking
-- ✅ Demo applications
-- ✅ Test coverage
+Optional (recommended): install OpenAI SDK for first-class client support (client auto-detects and uses SDK when available; otherwise it uses HTTPS fallback):
 
-The module structure and API interfaces remain consistent, enabling code reuse and knowledge transfer between Python and Node.js implementations.
+```bash
+pip install -e .[openai]
+```
+
+
+## Wrapper API (Agent or Model Invocation)
+
+Use the wrapper to route either agent-side orchestration calls or direct model calls through a single observability envelope.
+
+```python
+from mcp_observatory.instrument import instrument_wrapper_api
+
+wrapper = instrument_wrapper_api("my-service")
+
+result = await wrapper.invoke(
+    source="agent",
+    model="gpt-4o-mini",
+    prompt="Generate deployment plan",
+    input_payload={"request_id": "abc123", "task": "deployment_plan"},
+    call=lambda: {"plan": "blue-green rollout"},
+)
+
+print(result.decision.action)  # allow/review/block
+print(result.span.cost_usd)
+```
+
+Dual-run measurement is supported with `dual_invoke=True` and shadow parameters (`shadow_source`, `shadow_model`, `shadow_agent_params`, `shadow_model_params`, and `shadow_call`) to compare alternate execution paths and capture disagreement metrics.
+
+The wrapper output (`WrapperResult`) includes:
+
+- `output`: raw callable output
+- `span`: captured telemetry metrics (tokens, cost, hashes, timing)
+- `decision`: policy decision suitable for downstream execution routing
+- `shadow_output` and `shadow_span` (when `dual_invoke=True`) with comparison metrics on primary span (`shadow_disagreement_score`, `shadow_numeric_variance`)
