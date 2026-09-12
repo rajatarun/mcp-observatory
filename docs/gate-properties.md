@@ -187,13 +187,40 @@ input (answer, resample, context).
 | composite | `O(6)` | |
 
 The full path is linear in the total size of its text inputs and arguments,
-with no step super-linear beyond key sorting. Measured medians are in the
-paper (0.0996 ms for the gate path on ~100-byte inputs); worst-case scaling
-against adversarially large inputs is measured in `scripts/bench_gate.py`
-(see the latency work) rather than asserted here. The relevant operational
-guard is an input-size limit upstream of the gate, since a 10 MB argument
-mapping costs 10 MB of hashing and there is nothing the gate can do about
-that except refuse it.
+with no step super-linear beyond key sorting. Measured with
+`scripts/bench_gate.py` (100 iterations per point, one core, Python 3.11;
+median ms; the last column is the least-squares exponent of cost against
+input size, where 1.0 is linear):
+
+| Step | 100 B | 1 KB | 10 KB | 100 KB | 1 MB | exponent |
+|---|---:|---:|---:|---:|---:|---:|
+| args hash (canonical JSON + SHA-256) | 0.003 | 0.010 | 0.075 | 0.83 | 11.2 | 0.90 |
+| token issue + verify (`tool_name` = N) | 0.028 | 0.045 | 0.19 | 1.60 | 18.7 | 0.72 |
+| output instability (Jaccard) | 0.007 | 0.059 | 0.85 | 9.3 | 111 | 1.06 |
+| numeric variance | 0.024 | 0.16 | 1.31 | 12.6 | 128 | 0.93 |
+| grounding risk (Jaccard) | 0.014 | 0.12 | 1.43 | 14.0 | 174 | 1.03 |
+| **full propose/commit path** | **0.076** | 0.30 | 2.3 | 22 | 261 | 0.89 |
+| **full six-signal risk vector** | **0.077** | 0.52 | 4.9 | 48 | 551 | 0.97 |
+
+Two readings. First, the 100-byte column reproduces the paper's 0.0996 ms
+figure for the typical case. Second, the gate cannot bound its own latency:
+at 1 MB of text the six-signal vector costs half a second, and every step
+scales as the table says it should. The operational guard is therefore an
+input-size limit *upstream* of the gate. 10 KB (≈2–5 ms) is a defensible
+default for argument mappings and answers alike; anything larger should be
+refused or summarised before scoring, since there is nothing the gate can do
+about a 1 MB argument except hash it.
+
+### Semantics of `s`
+
+`s` is a weighted mean of lexical risk indicators. It is not a probability
+of harm, its thresholds have never been fit to outcomes, and it is comparable
+across calls only at equal `|D|`. What that means for anyone who wants to
+combine `s` with a confidence from another system is set out in
+`ContextWeave/docs/confidence-semantics.md`, which inventories the scores of
+all three weave systems and states the rules under which they may be
+combined (in short: only after calibration against an outcome, which for
+`s` requires recording what happened after each REVIEW and ALLOW).
 
 ---
 
