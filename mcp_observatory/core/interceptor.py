@@ -136,6 +136,7 @@ class MCPInterceptor:
             composite_risk_score=rv.composite_risk_score,
             risk_tier=rv.composite_risk_level,
             context={"tool_name": tool_name},
+            signals_defined=rv.signals_defined,
         )
         ctx.policy_decision = policy.decision.value
         ctx.policy_id = policy.policy_id

@@ -13,6 +13,19 @@ from ..utils.time import utc_now
 from .types import VerificationResult
 
 
+def _decode_canonical(segment: str) -> bytes:
+    """Decode base64url accepting only the canonical spelling.
+
+    The lenient decoder ignores bytes after padding, so ``token + "x"`` verified
+    as ``token``. The token hash recorded on the span is sha256 over the string,
+    so a malleable string lets one authorisation appear under many hashes.
+    """
+    raw = base64.urlsafe_b64decode(segment.encode("utf-8"))
+    if base64.urlsafe_b64encode(raw).decode("utf-8") != segment:
+        raise ValueError("non-canonical base64 segment")
+    return raw
+
+
 class TokenVerifier:
     """Verify signed execution tokens and bind them to tool invocation args."""
 
@@ -24,8 +37,8 @@ class TokenVerifier:
     def verify(self, token: str, *, tool_name: str, tool_args_hash: str) -> VerificationResult:
         try:
             payload_b64, sig_b64 = token.split(".", 1)
-            payload_raw = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
-            sig = base64.urlsafe_b64decode(sig_b64.encode("utf-8"))
+            payload_raw = _decode_canonical(payload_b64)
+            sig = _decode_canonical(sig_b64)
         except Exception:
             return VerificationResult(False, "token_decode_failed")
 

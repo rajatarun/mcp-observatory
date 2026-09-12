@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -13,6 +12,15 @@ import asyncpg
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+# Replay protection holds only while a spent nonce is remembered for at least as
+# long as its token can still verify. Token expiry is judged on the application
+# clock; Postgres garbage-collects on NOW(). If the database clock runs ahead, a
+# nonce could be deleted while the token is still valid, opening a replay window
+# equal to the skew. Keeping nonces this much past expiry closes that window for
+# any skew below the grace. Storage cost: a few hundred rows per second of load.
+NONCE_GC_GRACE_SECONDS = 300
 
 
 class ProposalCommitStorage(ABC):
@@ -184,7 +192,10 @@ class PostgresStorage(ProposalCommitStorage):
         assert self.pool is not None
         async with self.pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("DELETE FROM nonces WHERE expires_at <= NOW()")
+                await conn.execute(
+                    "DELETE FROM nonces WHERE expires_at <= NOW() - make_interval(secs => $1)",
+                    float(NONCE_GC_GRACE_SECONDS),
+                )
                 exists = await conn.fetchrow("SELECT nonce FROM nonces WHERE nonce=$1", nonce)
                 if exists:
                     return True

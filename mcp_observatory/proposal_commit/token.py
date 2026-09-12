@@ -13,6 +13,23 @@ from typing import Any
 from uuid import uuid4
 
 
+def _decode_canonical(segment: str) -> bytes:
+    """Decode a base64url segment, accepting only its canonical spelling.
+
+    The standard decoder is lenient: it ignores characters after the padding
+    and non-alphabet characters, so ``token + "x"`` decoded to the same bytes
+    as ``token`` and verified. Replay was still caught (the nonce lives in the
+    payload), but a token then had unboundedly many accepted spellings, and
+    anything keyed on the token string -- audit rows storing sha256(token) --
+    could record the same authorisation under different hashes. Requiring the
+    round-trip to reproduce the input makes the token string canonical.
+    """
+    raw = base64.urlsafe_b64decode(segment.encode("utf-8"))
+    if base64.urlsafe_b64encode(raw).decode("utf-8") != segment:
+        raise ValueError("non-canonical base64 segment")
+    return raw
+
+
 @dataclass(frozen=True)
 class TokenIssueResult:
     token: str
@@ -61,8 +78,8 @@ class CommitTokenManager:
     def verify(self, token: str) -> TokenVerifyResult:
         try:
             payload_b64, sig_b64 = token.split(".", 1)
-            payload_raw = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
-            sig = base64.urlsafe_b64decode(sig_b64.encode("utf-8"))
+            payload_raw = _decode_canonical(payload_b64)
+            sig = _decode_canonical(sig_b64)
         except Exception:
             return TokenVerifyResult(valid=False, reason="bad_signature")
 

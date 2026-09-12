@@ -76,8 +76,14 @@ def prompt_drift(prompt: str, baseline_hash: Optional[str]) -> Optional[float]:
     return 0.0 if prompt_hash(prompt) == baseline_hash else 1.0
 
 
-def composite_score(signals: dict[str, Optional[float]], weights: Optional[dict[str, float]] = None) -> float:
-    """Weighted renormalized composite score over available signals."""
+def composite_score(signals: dict[str, Optional[float]], weights: Optional[dict[str, float]] = None) -> Optional[float]:
+    """Weighted composite renormalised over the signals that are defined.
+
+    Returns ``None`` when no signal is defined. The previous behaviour returned
+    0.0, which the proposer read as "safe enough to allow" -- an absence of
+    evidence scored as the best possible evidence. Callers must treat ``None``
+    as a reason to block, not as zero risk.
+    """
     w = weights or DEFAULT_WEIGHTS
     total_weight = 0.0
     weighted_sum = 0.0
@@ -88,7 +94,7 @@ def composite_score(signals: dict[str, Optional[float]], weights: Optional[dict[
         weighted_sum += max(0.0, min(1.0, value)) * weight
         total_weight += weight
     if total_weight == 0.0:
-        return 0.0
+        return None
     return max(0.0, min(1.0, weighted_sum / total_weight))
 
 

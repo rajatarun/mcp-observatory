@@ -67,13 +67,20 @@ class ToolProposer:
         score = composite_score(signals)
 
         proposal_id = str(uuid4())
-        decision = "allow" if score < self.config.block_threshold else "block"
+        # No computable signal is not zero risk. Block, and record the proposal
+        # at the maximal score (the column is NOT NULL) so the row reads as the
+        # most conservative decision rather than the least.
+        if score is None:
+            decision, stored_score, block_reason = "block", 1.0, "no_signals"
+        else:
+            decision = "allow" if score < self.config.block_threshold else "block"
+            stored_score, block_reason = score, "low_integrity"
         await self.storage.save_proposal(
             proposal_id=proposal_id,
             tool_name=tool_name,
             args_json=args_json,
             prompt_hash=p_hash,
-            composite_score=score,
+            composite_score=stored_score,
             decision=decision,
             created_at=utc_now(),
         )
@@ -82,7 +89,7 @@ class ToolProposer:
             return {
                 "status": "blocked",
                 "action": "create_draft",
-                "reason": "low_integrity",
+                "reason": block_reason,
                 "proposal_id": proposal_id,
                 "draft": {
                     "tool": tool_name,

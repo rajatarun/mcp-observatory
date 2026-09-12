@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from statistics import mean
-from typing import Optional, Sequence
+from typing import Optional
 
 from ..utils.hashing import normalize_text, sha256_hex
 
@@ -35,9 +35,12 @@ def prompt_hash(prompt: str) -> str:
     return sha256_hex(normalize_text(prompt))
 
 
-def drift_risk(*, previous_prompt_hash: Optional[str], current_prompt_hash: str) -> float:
+def drift_risk(*, previous_prompt_hash: Optional[str], current_prompt_hash: str) -> Optional[float]:
+    # No baseline means drift was not observed, not that there was none. Returning
+    # 0.0 here made a first-turn call look safer than one with a matching baseline
+    # and diluted the composite; undefined lets the renormalisation exclude it.
     if not previous_prompt_hash:
-        return 0.0
+        return None
     return 1.0 if previous_prompt_hash != current_prompt_hash else 0.0
 
 
@@ -85,9 +88,11 @@ def numeric_instability_risk(answer: str, secondary_answer: Optional[str]) -> Op
     return clamp01(spread)
 
 
-def tool_mismatch_risk(answer: str, tool_result_summary: Optional[str]) -> float:
+def tool_mismatch_risk(answer: str, tool_result_summary: Optional[str]) -> Optional[float]:
+    # Same reasoning as drift_risk: with no tool result there is nothing to
+    # compare the answer against, so the signal is undefined rather than zero.
     if not tool_result_summary:
-        return 0.0
+        return None
     answer_n = normalize_text(answer)
     tool_n = normalize_text(tool_result_summary)
     failure_markers = ("fail", "error", "declined", "denied", "timeout")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .scoring import composite_risk_score
+from .scoring import composite_risk_score, defined_signal_count
 from .signals import (
     drift_risk,
     grounding_risk,
@@ -25,11 +25,15 @@ class RiskVector:
     grounding_risk: Optional[float]
     self_consistency_risk: Optional[float]
     numeric_instability_risk: Optional[float]
-    tool_mismatch_risk: float
-    drift_risk: float
+    tool_mismatch_risk: Optional[float]
+    drift_risk: Optional[float]
     verifier_risk: float
-    composite_risk_score: float
+    composite_risk_score: Optional[float]
     composite_risk_level: str
+    # How many of the six signals informed the composite. A low score from one
+    # signal is not the same evidence as a low score from six; the policy
+    # engine needs this to refuse to clear a critical tool on too little.
+    signals_defined: int = 0
 
 
 def compute_risk_vector(
@@ -49,18 +53,18 @@ def compute_risk_vector(
     d_risk = drift_risk(previous_prompt_hash=previous_prompt_hash, current_prompt_hash=p_hash)
     v_risk = verifier_risk(answer, low_grounding=(g_risk is not None and g_risk > 0.75))
 
-    score, level = composite_risk_score(
-        {
-            "grounding_risk": g_risk,
-            "self_consistency_risk": sc_risk,
-            "verifier_risk": v_risk,
-            "numeric_instability_risk": ni_risk,
-            "tool_mismatch_risk": tm_risk,
-            "drift_risk": d_risk,
-        }
-    )
+    components = {
+        "grounding_risk": g_risk,
+        "self_consistency_risk": sc_risk,
+        "verifier_risk": v_risk,
+        "numeric_instability_risk": ni_risk,
+        "tool_mismatch_risk": tm_risk,
+        "drift_risk": d_risk,
+    }
+    score, level = composite_risk_score(components)
 
     return RiskVector(
+        signals_defined=defined_signal_count(components),
         prompt_hash=p_hash,
         grounding_risk=g_risk,
         self_consistency_risk=sc_risk,
