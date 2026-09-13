@@ -11,6 +11,8 @@ from mcp_observatory.fallback.router import FallbackRouter
 from mcp_observatory.policy.registry import DEFAULT_REGISTRY, tool_profile
 from mcp_observatory.proposal_commit import CommitTokenManager, CommitVerifier, ToolProposer, create_storage_from_env
 
+from ._allow_dev_secret import allow_dev_secret_for_demo
+
 
 @tool_profile(criticality="HIGH", irreversible=True, regulatory=True, risk_tier="HIGH", registry=DEFAULT_REGISTRY)
 async def initiate_wire_transfer(*, amount: float, destination_iban: str, reason: str) -> dict[str, Any]:
@@ -220,6 +222,7 @@ class RealWorldMCPServer:
     """Real-world runner that uses proposal/commit for HIGH-risk tools."""
 
     def __init__(self) -> None:
+        allow_dev_secret_for_demo()
         router = FallbackRouter()
         for scenario in build_real_world_scenarios():
             router.register(scenario.tool_name, _draft_fallback)

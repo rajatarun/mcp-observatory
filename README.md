@@ -83,6 +83,18 @@ Blocked proposal response is deterministic and side-effect free:
 }
 ```
 
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_OBSERVATORY_TOKEN_SECRET` | *(none — required)* | HMAC secret for `TokenIssuer`/`TokenVerifier` (the v2 control-plane execution token). |
+| `MCP_OBSERVATORY_COMMIT_SECRET` | *(none — required)* | HMAC secret for `CommitTokenManager` (the propose/commit token). |
+| `MCP_OBSERVATORY_ALLOW_DEV_SECRET` | unset | Set to `1` to allow the library's known development secrets when the two variables above are unset. **Local development and tests only** — the default secrets are public (they are in this repository's source) and a production deployment that relies on them is signing tokens with a key anyone can look up. The bundled demos (`mcp_observatory.demo.server`, `mcp_observatory.demo.real_world_server`) set this automatically, with a loud warning, so they keep running with no configuration. |
+| `MCP_OBSERVATORY_MAX_INPUT_BYTES` | `10240` | Ceiling, in UTF-8 bytes, on the canonical JSON of `tool_args` and on any single text input (answer, retrieved context, tool result summary, prompt, candidate outputs) before it is scored. Scoring cost is linear in input size (`docs/gate-properties.md` P5), so the gate has no latency bound of its own without this. Over the limit, `core/interceptor.py`'s v2 path routes to the fallback and `proposal_commit/proposer.py` returns a blocked response, both with reason `input_too_large`, instead of hashing or scoring the oversized input. |
+| `MCP_OBSERVATORY_PG_DSN` (or `DATABASE_URL`) | unset | Postgres DSN for `create_storage_from_env()`/`PostgresExporter`. Falls back to in-memory storage when unset. |
+
+Neither secret variable has a default: constructing `TokenIssuer`, `TokenVerifier`, or `CommitTokenManager` without an explicit secret and without one of these set raises `InsecureDefaultSecretError` (`mcp_observatory.utils.secrets`) rather than silently signing with a hardcoded value.
+
 ## Running the Demo
 
 ### Without Postgres (default)

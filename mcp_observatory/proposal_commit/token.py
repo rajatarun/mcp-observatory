@@ -5,12 +5,13 @@ from __future__ import annotations
 import base64
 import hmac
 import json
-import os
 from dataclasses import dataclass
 from hashlib import sha256
 from time import time
 from typing import Any
 from uuid import uuid4
+
+from ..utils.secrets import resolve_secret
 
 
 def _decode_canonical(segment: str) -> bytes:
@@ -48,7 +49,12 @@ class CommitTokenManager:
     """Issue and verify HMAC-SHA256 commit tokens."""
 
     def __init__(self, secret: str | None = None, ttl_seconds: int = 60) -> None:
-        self.secret = (secret or os.getenv("MCP_OBSERVATORY_COMMIT_SECRET", "dev-commit-secret")).encode("utf-8")
+        self.secret = resolve_secret(
+            secret,
+            env_var="MCP_OBSERVATORY_COMMIT_SECRET",
+            dev_default="dev-commit-secret",
+            label="MCP_OBSERVATORY_COMMIT_SECRET",
+        ).encode("utf-8")
         self.ttl_seconds = ttl_seconds
 
     def issue(
