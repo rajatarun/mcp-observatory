@@ -37,6 +37,25 @@ ToolWeave telemetry write has been rejected by DynamoDB and reported to
 ToolWeave as success, for the entire life of the integration. There is no
 alarm, no log line, and no row.
 
+**Corrected after the fix (this audit undercounted it).** There were *two*
+writers with the identical bug, not one: `DynamoDBSpanExporter.export()`
+(`WRAPPER#`) and `_write_invocation_metric()` (`INVOCATION#`), the latter
+wrapping all four MCP tools. The items also violated two further invariants
+the key rename alone did not resolve — `sk` was a bare timestamp rather than
+`{iso8601}#{trace_id}` (I3), and there was no `ttl` (I4). The missing trace id
+carried its own latent bug: two spans for the same method in the same
+microsecond shared a pk+sk and silently overwrote each other. All of it is
+fixed, with a warn-once logger so the next systemic write failure is visible.
+
+**Status: fixed** (ToolWeave `b60d5ca`), with a regression test verified to
+fail when the bug is reintroduced.
+
+Two consequences of the fix worth stating plainly: ToolWeave now actually
+writes, so it starts paying PutItem and storage costs it was never really
+paying (bounded by a 90-day TTL); and because `WRAPPER#`/`INVOCATION#` still
+have no reader, it now pays for durable telemetry nothing displays. That
+second part is F2's decision, not a defect in the fix.
+
 The bare except is not itself wrong — telemetry genuinely should not crash the
 call it observes — but combined with a key-spelling bug it converts a hard,
 immediate, obvious failure into permanent silence.
@@ -59,6 +78,12 @@ half is not true. The writers agree on the table and on nothing else:
 | ContextWeave `src/shared/mcp_observatory.py` | `OBSERVATORY#{operation}` | yes |
 | ScreenWeave `src/lambda/mcpServer/observatory.mjs` | `OBSERVATORY#{toolName}` | **no** (see below) |
 | ToolWeave `src/toolweave/observatory.py` | `WRAPPER#{method}` / `INVOCATION#` | **no** (and see F1) |
+| RoutineWeave `src/storage/ObservatoryMetricsStore.ts` | `OBSERVATORY#invoke_model` | yes |
+
+(DataDictionary appears in no row: it has no shared-table writer at all. Its
+`put_item` calls target its own tables and its observatory module uses the
+gate only. That was confirmed while adding its conformance test, which pins
+the absence so that a future exporter has to target a read namespace.)
 
 The readers are `TeamWeave/src/orchestrator/agent_metrics_handler.py` and the
 unified `/observability` handler that reuses its query logic, plus
@@ -111,6 +136,12 @@ commit token), and no input-size ceiling before hashing.
 This is the same defect class already found and fixed in RoutineWeave. The
 caret-on-`0.x` trap is worth stating plainly because it silently defeats the
 intent of "we pinned everyone to the hardened release".
+
+**Status: fixed** (ScreenWeave `c85825d`, repinned `^0.4.0`, lockfile resolves
+`0.4.1`). The repin was verified safe before being made: ScreenWeave uses only
+`InvocationWrapper` and never constructs a `TokenManager` or calls `propose()`,
+so neither of 0.4.0's breaking changes (construction throws without a commit
+secret; no-signal proposals now refuse) applies to it.
 
 ---
 
@@ -188,14 +219,46 @@ listing zero records and the failure surfaces as "no DPO records found".
 
 ---
 
+## F9 — DeployWeave's CI has never run its test files
+
+**Severity: medium. Found while adding the tests; fixed.**
+
+Two collection gaps that cancelled out badly. `unit_tests.py` does not match
+pytest's default `python_files` glob, so a bare `pytest` collected 30 tests and
+silently skipped its 85. Both CI workflows named that one file explicitly
+(`pytest unit_tests.py -v`), so CI ran those 85 and silently skipped every
+`test_*.py` file — including `test_observatory_metrics.py`, which had never run
+in CI at all.
+
+This matters more than an ordinary coverage gap because of what was being
+added: a contract test exists to catch drift between repositories
+automatically, and one that CI never runs catches drift only when somebody
+remembers to look, which is the practice it was meant to replace.
+
+**Status: fixed** (DeployWeave `9603c1d`). A `pytest.ini` names both patterns so
+a bare `pytest` collects everything and the next test file added is picked up
+without editing a workflow; both workflows now run plain `pytest -v`. All 115
+tests pass together, so widening the run did not turn CI red.
+
+---
+
 ## What the tests added alongside this audit do and do not cover
 
-Added: a vendored contract plus a conformance test in each participating
-repository, so every writer checks its own emitted item and every reader checks
+Added, across nine repositories: a vendored contract plus a conformance test in
+each participating repository, so every writer checks its own emitted item and every reader checks
 its own query against one shared definition
 (`contracts/observatory_metrics_item.json`, canonical home: this repository);
 and producer/consumer contract tests on both sides of the ContextWeave HTTP
 seam driven from `contracts/contextweave_http_api.json`.
+
+Each coupling was mutation-tested rather than assumed: renaming a field in a
+contract, respelling a partition key, dropping an operation from a reader's
+list, or marking an unread namespace read all make the relevant repository's
+suite fail. One honest limit surfaced that way and is worth recording —
+renaming `avgRating`/`meanAbsDiff` does *not* fail TeamWeave, because TeamWeave
+passes the routing-decisions payload through verbatim and reads no key of it by
+name. Those field names are pinned on ContextWeave's producer side instead;
+asserting them on the consumer side would have been theatre.
 
 These catch drift — a renamed field, a changed key spelling, a writer inventing
 a namespace, a reader dropping an operation. They do not and cannot catch a
