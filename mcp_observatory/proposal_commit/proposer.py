@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 from uuid import uuid4
 
 from ..utils.limits import any_exceeds_limit, exceeds_limit
+from .channel import STRONGEST_PROFILE, normalise_profile
 from .hashing import canonical_json, prompt_hash, tool_args_hash
 from .scoring import composite_score, model_generate, numeric_variance, output_instability, prompt_drift
 from .storage import ProposalCommitStorage, utc_now
 from .token import CommitTokenManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -29,10 +33,27 @@ class ToolProposer:
         storage: ProposalCommitStorage,
         token_manager: CommitTokenManager,
         config: ProposalConfig | None = None,
+        channel_profile_provider: Optional[
+            Callable[[str, dict[str, Any]], Awaitable[str]]
+        ] = None,
     ) -> None:
+        """
+        ``channel_profile_provider`` is an optional async callable
+        ``(tool_name, tool_args) -> profile`` naming the channel strength this
+        call must run over. It is injected rather than imported: this library is
+        a dependency of several unrelated products and most of them run no
+        channel policy, so importing the service that produces the profile would
+        make every consumer depend on it — and an ImportError in the gate would
+        fail closed for a deployment that never asked for the feature.
+
+        When it is absent, no requirement is bound and nothing changes. When it
+        is present but raises, the call is bound to the strongest profile: a
+        policy service that could not be reached has not said "unconstrained".
+        """
         self.storage = storage
         self.token_manager = token_manager
         self.config = config or ProposalConfig()
+        self.channel_profile_provider = channel_profile_provider
 
     async def propose(
         self,
@@ -117,11 +138,18 @@ class ToolProposer:
                 "composite_score": score,
             }
 
+        # Only an allowed proposal mints a token, so only this path needs a
+        # profile: a blocked proposal has nothing to bind, and keeping the
+        # lookup out of the input_too_large branch keeps that refusal free of an
+        # outbound call — the branch exists to refuse work before doing any.
+        required_profile = await self._required_channel_profile(tool_name, tool_args)
+
         token = self.token_manager.issue(
             proposal_id=proposal_id,
             tool_name=tool_name,
             tool_args_hash=args_digest,
             composite_score=score,
+            required_cipher_profile=required_profile,
         )
         return {
             "status": "allowed",
@@ -133,3 +161,20 @@ class ToolProposer:
             "commit_token": token.token,
             "token_id": token.token_id,
         }
+
+    async def _required_channel_profile(
+        self, tool_name: str, tool_args: dict[str, Any]
+    ) -> str | None:
+        """Ask the channel policy what this call needs; fail secure if it cannot say."""
+        if self.channel_profile_provider is None:
+            return None
+        try:
+            return normalise_profile(await self.channel_profile_provider(tool_name, tool_args))
+        except Exception:  # noqa: BLE001 - any failure means "we do not know"
+            logger.warning(
+                "channel profile lookup failed for tool %s; binding %s",
+                tool_name,
+                STRONGEST_PROFILE,
+                exc_info=True,
+            )
+            return STRONGEST_PROFILE
