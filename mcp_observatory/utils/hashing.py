@@ -20,7 +20,11 @@ def normalize_text(value: str) -> str:
     return _WS_RE.sub(" ", value.strip().lower())
 
 
+def canonical_json(value: Any) -> str:
+    """Return stable compact JSON with sorted keys, as used for ``args_hash``."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
 def args_hash(tool_args: Any) -> str:
     """Return stable SHA-256 hash for JSON-serializable arguments."""
-    payload = json.dumps(tool_args, sort_keys=True, separators=(",", ":"), default=str)
-    return sha256_hex(normalize_text(payload))
+    return sha256_hex(normalize_text(canonical_json(tool_args)))

@@ -5,10 +5,10 @@ from __future__ import annotations
 import base64
 import hmac
 import json
-import os
 from hashlib import sha256
 from uuid import uuid4
 
+from ..utils.secrets import resolve_secret
 from ..utils.time import utc_now
 from .types import IssuedToken
 
@@ -17,7 +17,12 @@ class TokenIssuer:
     """Issue compact signed tokens for internal tool execution authorization."""
 
     def __init__(self, *, secret_key: str | None = None, ttl_ms: int = 30_000) -> None:
-        self._secret = (secret_key or os.getenv("MCP_OBSERVATORY_TOKEN_SECRET", "dev-secret")).encode("utf-8")
+        self._secret = resolve_secret(
+            secret_key,
+            env_var="MCP_OBSERVATORY_TOKEN_SECRET",
+            dev_default="dev-secret",
+            label="MCP_OBSERVATORY_TOKEN_SECRET",
+        ).encode("utf-8")
         self.ttl_ms = ttl_ms
 
     def issue(

@@ -83,6 +83,18 @@ Blocked proposal response is deterministic and side-effect free:
 }
 ```
 
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `MCP_OBSERVATORY_TOKEN_SECRET` | *(none — required)* | HMAC secret for `TokenIssuer`/`TokenVerifier` (the v2 control-plane execution token). |
+| `MCP_OBSERVATORY_COMMIT_SECRET` | *(none — required)* | HMAC secret for `CommitTokenManager` (the propose/commit token). |
+| `MCP_OBSERVATORY_ALLOW_DEV_SECRET` | unset | Set to `1` to allow the library's known development secrets when the two variables above are unset. **Local development and tests only** — the default secrets are public (they are in this repository's source) and a production deployment that relies on them is signing tokens with a key anyone can look up. The bundled demos (`mcp_observatory.demo.server`, `mcp_observatory.demo.real_world_server`) set this automatically, with a loud warning, so they keep running with no configuration. |
+| `MCP_OBSERVATORY_MAX_INPUT_BYTES` | `10240` | Ceiling, in UTF-8 bytes, on the canonical JSON of `tool_args` and on any single text input (answer, retrieved context, tool result summary, prompt, candidate outputs) before it is scored. Scoring cost is linear in input size (`docs/gate-properties.md` P5), so the gate has no latency bound of its own without this. Over the limit, `core/interceptor.py`'s v2 path routes to the fallback and `proposal_commit/proposer.py` returns a blocked response, both with reason `input_too_large`, instead of hashing or scoring the oversized input. |
+| `MCP_OBSERVATORY_PG_DSN` (or `DATABASE_URL`) | unset | Postgres DSN for `create_storage_from_env()`/`PostgresExporter`. Falls back to in-memory storage when unset. |
+
+Neither secret variable has a default: constructing `TokenIssuer`, `TokenVerifier`, or `CommitTokenManager` without an explicit secret and without one of these set raises `InsecureDefaultSecretError` (`mcp_observatory.utils.secrets`) rather than silently signing with a hardcoded value.
+
 ## Running the Demo
 
 ### Without Postgres (default)
@@ -202,3 +214,33 @@ The wrapper output (`WrapperResult`) includes:
 - `span`: captured telemetry metrics (tokens, cost, hashes, timing)
 - `decision`: policy decision suitable for downstream execution routing
 - `shadow_output` and `shadow_span` (when `dual_invoke=True`) with comparison metrics on primary span (`shadow_disagreement_score`, `shadow_numeric_variance`)
+
+## AWS Integration (`mcp_observatory.aws`)
+
+Common wiring extracted from services that deploy this library on AWS Lambda. Install the extra to use it:
+
+```bash
+pip install mcp-observatory[aws]
+```
+
+Importing `mcp_observatory.aws` never requires `boto3` — it is imported lazily on first use, so the rest of the library still imports fine without it.
+
+```python
+from mcp_observatory.aws import DynamoDBSpanExporter, build_gate
+
+# Writes every populated TraceContext field to a DynamoDB table (name from
+# OBSERVATORY_METRICS_TABLE, or pass table_name=) with a TTL attribute.
+exporter = DynamoDBSpanExporter(ttl_seconds=90 * 24 * 60 * 60)
+
+# Wires an InMemoryStorage- (or Postgres-, when MCP_OBSERVATORY_PG_DSN is
+# set) backed ToolProposer + CommitVerifier sharing one CommitTokenManager.
+# secret_env/block_threshold_env let each service keep its own env var
+# names; the secret still fails closed per the Environment Variables table
+# above.
+proposer, verifier, token_manager = build_gate(
+    secret_env="OBSERVATORY_SECRET_KEY",
+    block_threshold_env="OBSERVATORY_BLOCK_THRESHOLD",
+)
+```
+
+There is no `observe_model_request`-style helper here: the services this was extracted from do not agree on its shape (see `CHANGELOG.md` 0.3.0), so none is provided.

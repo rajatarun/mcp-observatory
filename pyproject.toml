@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-observatory"
-version = "0.2.1"
+version = "0.3.0"
 description = "Observability and APM toolkit for MCP servers"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -27,6 +27,9 @@ dependencies = [
 [project.optional-dependencies]
 openai = [
   "openai>=1.40.0",
+]
+aws = [
+  "boto3>=1.34.0",
 ]
 dev = [
   "pytest>=8.0.0",

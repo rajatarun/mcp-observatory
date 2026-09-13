@@ -33,6 +33,7 @@ from ..shadow.lane import schedule_shadow_lane
 from ..token.issuer import TokenIssuer
 from ..token.verifier import TokenVerifier
 from ..utils.hashing import args_hash
+from ..utils.limits import any_exceeds_limit, tool_args_exceed_limit
 from .tracer import Tracer
 
 ModelCallable = Callable[..., Awaitable[Any]]
@@ -108,6 +109,24 @@ class MCPInterceptor:
         ctx.session_id = session_id
         ctx.method = "tools/call"
         ctx.prompt_template_id = prompt_template_id
+
+        # Cost is linear in input size (docs/gate-properties.md P5); the gate
+        # cannot bound its own latency, so refuse before hashing or scoring
+        # an oversized call rather than after.
+        if tool_args_exceed_limit(tool_args) or any_exceeds_limit(
+            model_answer, secondary_answer, retrieved_context, tool_result_summary, prompt
+        ):
+            ctx.fallback_used = True
+            ctx.fallback_reason = "input_too_large"
+            result, fallback_type = await self.fallback_router.route(
+                tool_name=tool_name, tool_args=tool_args, reason="input_too_large"
+            )
+            ctx.fallback_type = fallback_type
+            self.tracer.end_span(ctx)
+            if self.exporter:
+                await self.exporter.export(ctx)
+            return result
+
         ctx.tool_args_hash = args_hash(tool_args)
 
         rv = compute_risk_vector(
@@ -136,6 +155,7 @@ class MCPInterceptor:
             composite_risk_score=rv.composite_risk_score,
             risk_tier=rv.composite_risk_level,
             context={"tool_name": tool_name},
+            signals_defined=rv.signals_defined,
         )
         ctx.policy_decision = policy.decision.value
         ctx.policy_id = policy.policy_id

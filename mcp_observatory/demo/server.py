@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from mcp_observatory.proposal_commit import CommitTokenManager, CommitVerifier, ToolProposer, create_storage_from_env
 
+from ._allow_dev_secret import allow_dev_secret_for_demo
+
 
 @dataclass
 class Ledger:
@@ -18,6 +20,7 @@ class DemoToolServer:
     """MCP-like interface exposing transfer_funds_propose and transfer_funds_commit."""
 
     def __init__(self) -> None:
+        allow_dev_secret_for_demo()
         self.storage = create_storage_from_env()
         self.token_manager = CommitTokenManager()
         self.proposer = ToolProposer(storage=self.storage, token_manager=self.token_manager)

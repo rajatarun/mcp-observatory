@@ -5,27 +5,45 @@ from __future__ import annotations
 import base64
 import hmac
 import json
-import os
 from hashlib import sha256
 from typing import Dict
 
+from ..utils.secrets import resolve_secret
 from ..utils.time import utc_now
 from .types import VerificationResult
+
+
+def _decode_canonical(segment: str) -> bytes:
+    """Decode base64url accepting only the canonical spelling.
+
+    The lenient decoder ignores bytes after padding, so ``token + "x"`` verified
+    as ``token``. The token hash recorded on the span is sha256 over the string,
+    so a malleable string lets one authorisation appear under many hashes.
+    """
+    raw = base64.urlsafe_b64decode(segment.encode("utf-8"))
+    if base64.urlsafe_b64encode(raw).decode("utf-8") != segment:
+        raise ValueError("non-canonical base64 segment")
+    return raw
 
 
 class TokenVerifier:
     """Verify signed execution tokens and bind them to tool invocation args."""
 
     def __init__(self, *, secret_key: str | None = None, replay_protection: bool = True) -> None:
-        self._secret = (secret_key or os.getenv("MCP_OBSERVATORY_TOKEN_SECRET", "dev-secret")).encode("utf-8")
+        self._secret = resolve_secret(
+            secret_key,
+            env_var="MCP_OBSERVATORY_TOKEN_SECRET",
+            dev_default="dev-secret",
+            label="MCP_OBSERVATORY_TOKEN_SECRET",
+        ).encode("utf-8")
         self._seen: Dict[str, int] = {}
         self._replay_protection = replay_protection
 
     def verify(self, token: str, *, tool_name: str, tool_args_hash: str) -> VerificationResult:
         try:
             payload_b64, sig_b64 = token.split(".", 1)
-            payload_raw = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
-            sig = base64.urlsafe_b64decode(sig_b64.encode("utf-8"))
+            payload_raw = _decode_canonical(payload_b64)
+            sig = _decode_canonical(sig_b64)
         except Exception:
             return VerificationResult(False, "token_decode_failed")
 
