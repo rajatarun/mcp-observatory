@@ -211,6 +211,15 @@ default for argument mappings and answers alike; anything larger should be
 refused or summarised before scoring, since there is nothing the gate can do
 about a 1 MB argument except hash it.
 
+That limit is implemented, not just recommended: `MCP_OBSERVATORY_MAX_INPUT_BYTES`
+(default 10240) is checked in `core/interceptor.py`'s v2 path before
+`compute_risk_vector` runs, and in `proposal_commit/proposer.py` before
+hashing or scoring, against the canonical JSON of `tool_args` and every text
+input (answer, secondary answer, retrieved context, tool result summary,
+prompt, candidate outputs). Over the limit, the call is refused with reason
+`input_too_large` — routed to the fallback in the v2 path, returned as a
+blocked proposal in the propose path — without ever reaching a scorer.
+
 ### Semantics of `s`
 
 `s` is a weighted mean of lexical risk indicators. It is not a probability

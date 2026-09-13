@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from uuid import uuid4
 
+from ..utils.limits import any_exceeds_limit, exceeds_limit
 from .hashing import canonical_json, prompt_hash, tool_args_hash
 from .scoring import composite_score, model_generate, numeric_variance, output_instability, prompt_drift
 from .storage import ProposalCommitStorage, utc_now
@@ -49,6 +50,22 @@ class ToolProposer:
         - deterministic blocked response with draft action
         """
         args_json = canonical_json(tool_args)
+
+        # Cost is linear in input size (docs/gate-properties.md P5); refuse
+        # before hashing the full payload, generating candidates, or scoring
+        # anything, not after.
+        if exceeds_limit(args_json) or any_exceeds_limit(prompt, candidate_output_a, candidate_output_b):
+            return {
+                "status": "blocked",
+                "action": "create_draft",
+                "reason": "input_too_large",
+                "draft": {
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "note": "Action blocked before scoring: input exceeds the configured size limit.",
+                },
+            }
+
         args_digest = tool_args_hash(tool_args)
 
         baseline = await self.storage.get_baseline_prompt_hash(tool_name)
