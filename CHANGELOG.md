@@ -2,6 +2,15 @@
 
 All notable changes to this package are documented in this file.
 
+## [0.4.1] - 2026-09-13
+
+Republished as 0.4.1. `0.4.0` was never published: an earlier `npm publish`
+attempt failed on the registry's authentication check partway through the
+upload, leaving an orphaned staged version behind. npm has no self-service
+way to clear a stuck stage, so `0.4.0` cannot be used for any release of
+this package; `0.4.1` carries the identical changes described below. No
+code differs between what was intended as 0.4.0 and this release.
+
 ## [0.4.0] - 2026-09-13
 
 Three hardening changes brought over from the Python package's 0.3.0. Two are
