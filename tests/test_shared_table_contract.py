@@ -72,26 +72,41 @@ def test_sort_key_orders_by_time_so_range_queries_work() -> None:
     assert timestamp.startswith("20"), f"sk must start with an ISO timestamp, got {item['sk']!r}"
 
 
-def test_the_namespace_this_exporter_writes_has_no_reader() -> None:
-    """A pinned statement of a live platform gap, not an endorsement of it.
+def test_rows_are_reachable_without_anyone_agreeing_on_the_pk_prefix() -> None:
+    """The v2 property, and the whole point of moving reads onto a GSI.
 
-    The library exporter writes ``SPAN#{tool or model}``. Both dashboard
-    readers in the portfolio (TeamWeave's agent-metrics and unified
-    observability handlers, DeployWeave's model selector) query only
-    ``OBSERVATORY#{operation}`` partitions. So a service that migrates from
-    its vendored copy onto this exporter -- which is exactly what platform
-    edge E2 asks every service to do -- keeps paying to write telemetry that
-    no dashboard will ever show.
-
-    This test passes today because the contract records the gap honestly
-    (status=unread). It fails the moment someone adds a reader without
-    updating the registry, or renames the namespace, which is when the
-    portfolio needs to notice.
+    Under v1 a reader queried whole partitions by exact pk, so this exporter's
+    ``SPAN#`` rows were invisible to every dashboard -- and a service migrating
+    onto this exporter (platform edge E2) silently vanished from them. The fix
+    was not to make this writer guess the readers' prefix grammar, but to stop
+    reads depending on the prefix at all: SpanTimelineIndex is keyed on
+    ``span_date`` and ``timestamp``, which this exporter sets, so the row is
+    reachable whatever its pk says.
     """
     item = _emit(tool_name="transfer_funds")
-    assert item["pk"].startswith("SPAN#")
-    assert readers_for(item["pk"]) == []
-    assert load_contract()["namespace_registry"]["SPAN"]["status"] == "unread"
+    contract = load_contract()
+    gsi = contract["gsi"]
+
+    assert item["pk"].startswith("SPAN#"), "pk is still the writer's own business"
+    for key in (gsi["partition_key"], gsi["sort_key"]):
+        assert key in item, f"{key} missing: the row would not be in {gsi['name']}"
+    assert item["span_date"] == item["timestamp"][:10]
+    assert check_item(item) == []
+
+
+def test_omitting_an_index_attribute_is_caught_rather_than_silent() -> None:
+    """Invisibility must fail a test, not merely happen.
+
+    A GSI indexes only items carrying both of its keys, so a writer that drops
+    one is exactly as invisible as the v1 prefix mismatches were. The only
+    difference worth having is that this one is noisy.
+    """
+    item = _emit(tool_name="t")
+    for missing in ("span_date", "timestamp", "operation"):
+        broken = {k: v for k, v in item.items() if k != missing}
+        problems = check_item(broken)
+        assert problems, f"dropping {missing} produced no contract violation"
+        assert any(missing in p for p in problems)
 
 
 @pytest.mark.parametrize(
@@ -105,10 +120,12 @@ def test_the_namespace_this_exporter_writes_has_no_reader() -> None:
     ],
 )
 def test_reader_reachability_is_explicit_per_namespace(pk: str, expected_readers: int) -> None:
-    """Which writers are actually visible to a dashboard, stated as data.
+    """Historical, kept for rows written before v2.
 
-    ScreenWeave is the subtle one: it uses the registered OBSERVATORY
-    namespace but puts a tool name where readers enumerate a fixed list of
-    operations, so its rows land in partitions nothing queries.
+    ``readers_for`` answers "which dashboard would have found this row by its
+    partition key", which under v1 was the only way a row was ever found. Rows
+    written before the SpanTimelineIndex migration have no ``span_date`` and so
+    are not in the index; this is still how they are reached. New rows do not
+    depend on any of it.
     """
     assert len(readers_for(pk)) == expected_readers

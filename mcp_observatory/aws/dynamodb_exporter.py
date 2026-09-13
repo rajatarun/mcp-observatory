@@ -121,10 +121,26 @@ class DynamoDBSpanExporter(Exporter):
             item[key] = _to_dynamo_value(value)
 
         partition = context.tool_name or context.model or "unknown"
-        sort = f"{context.start_time.isoformat()}#{context.trace_id}"
+        started = context.start_time.isoformat()
+        sort = f"{started}#{context.trace_id}"
         item["pk"] = f"SPAN#{partition}"
         item["sk"] = sort
         item["ttl"] = int(time.time()) + self._ttl_seconds
+
+        # Index attributes for SpanTimelineIndex (span_date HASH, timestamp
+        # RANGE). Readers query that index by day and filter in memory, so a
+        # reader never has to know which pk prefix a given writer chose --
+        # which is what let rows written under SPAN#, WRAPPER# and
+        # OBSERVATORY#{tool} become permanently invisible to every dashboard.
+        # A GSI only indexes items that carry its key attributes, so a writer
+        # that omits either of these is still invisible; contract invariants
+        # I6-I8 exist to make that a test failure rather than a silence.
+        item["timestamp"] = started
+        item["span_date"] = started[:10]  # YYYY-MM-DD, the index partition
+        item["operation"] = (
+            context.operation
+            or ("invoke_tool" if context.tool_name else "invoke_model" if context.model else "unknown")
+        )
         return item
 
     async def export(self, context: TraceContext) -> None:
