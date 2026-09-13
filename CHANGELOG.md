@@ -2,18 +2,22 @@
 
 All notable changes to this package are documented in this file.
 
-## [0.4.0] - 2026-09-13
+## [0.4.1] - 2026-09-13
 
-**Note on the publish history:** the first `npm publish` attempt for this
-version failed partway through (the workflow's `GITHUB_TOKEN` lacked
-`contents: write`, so the release step failed after the npm upload had
-already staged the version), which looked at the time like `0.4.0` itself
-was unusable and this package was briefly bumped to `0.4.1` to work around
-it. That bump was never published — re-running the fixed workflow against
-the original commit completed the `0.4.0` publish that had actually stuck,
-so `0.4.0` is the real, live, and only correct version number for this
-release. The `0.4.1` entry that briefly existed here has been removed as
-inaccurate; no code differs between what was tagged 0.4.1 and this release.
+Republished. `0.4.1` and `0.4.0` (below) carry identical code — verified
+byte-for-byte identical `dist/` output between the two published tarballs.
+
+**Publish history**, for anyone reconciling registry/repo state: the first
+`npm publish` for this release failed partway through (the workflow's
+`GITHUB_TOKEN` initially lacked `contents: write`, so the post-publish
+release step failed after the npm upload had already staged `0.4.0`). That
+looked like `0.4.0` was permanently stuck, so the version was bumped to
+`0.4.1` as a workaround. In fact two separate workflow runs each completed
+a real publish — one for the original `0.4.0`, one for `0.4.1` — so both
+versions are genuinely live on the registry; `0.4.1` is `latest`. This
+package's version is kept at `0.4.1` to match.
+
+## [0.4.0] - 2026-09-13
 
 Three hardening changes brought over from the Python package's 0.3.0. Two are
 **breaking**: construction can now throw, and calls that were previously
