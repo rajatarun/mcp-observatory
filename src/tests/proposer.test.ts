@@ -1,7 +1,15 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+
 import { ToolProposer } from '../proposal/proposer.js';
 import { TokenManager } from '../proposal/token.js';
+
+// `ToolProposer` builds a `TokenManager` when none is supplied, and that
+// constructor now refuses to invent a signing secret. Tests opt into the
+// public development secret. The secret is read when a manager is
+// constructed, not when the module loads, so setting it here is enough;
+// `node --test` gives each file its own process, so it does not leak.
+process.env.MCP_OBSERVATORY_ALLOW_DEV_SECRET = '1';
 
 test('Proposer creates proposals', async () => {
   const proposer = new ToolProposer();

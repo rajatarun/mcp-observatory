@@ -8,3 +8,14 @@ dist/
 .DS_Store
 *.log
 coverage/
+
+# This repository carries two unrelated package trees on separate branch
+# lines. Checking out `main-nodejs` in a clone that previously had a Python
+# branch checked out leaves the Python package's `mcp_observatory/` and
+# `tests/` directories behind as untracked files, and `git add -A` would
+# commit the entire Python package and its test suite into this npm
+# package. Both entries are anchored at the repository root: this package's
+# own TypeScript tests live at `src/tests/` (compiled to `dist/tests/`) and
+# are deliberately not matched.
+/mcp_observatory/
+/tests/
