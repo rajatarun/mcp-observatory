@@ -1,6 +1,11 @@
 import { ToolProposer } from '../proposal/proposer.js';
 import { CommitVerifier } from '../proposal/verifier.js';
+import { TokenManager } from '../proposal/token.js';
 import { Tracer } from '../core/tracer.js';
+import {
+  ALLOW_DEV_SECRET_ENV,
+  COMMIT_SECRET_ENV,
+} from '../utils/secrets.js';
 
 interface ToolCall {
   toolName: string;
@@ -15,8 +20,31 @@ export class MCPServer {
   private tracer: Tracer;
 
   constructor() {
-    this.proposer = new ToolProposer();
-    this.verifier = new CommitVerifier();
+    // The demo is meant to run with no configuration, so it opts itself
+    // into the public development secret — loudly, and only if the real
+    // one is absent. The opt-in happens here rather than at module scope
+    // because `src/index.ts` re-exports this class, and a module-scope
+    // `process.env` write would silently weaken every consumer that merely
+    // imports the package.
+    if (
+      !process.env[COMMIT_SECRET_ENV] &&
+      process.env[ALLOW_DEV_SECRET_ENV] !== '1'
+    ) {
+      console.warn(
+        `[mcp-observatory] demo: ${COMMIT_SECRET_ENV} is unset, enabling ` +
+          `${ALLOW_DEV_SECRET_ENV}=1 for this process. Never do this outside a demo.`
+      );
+      process.env[ALLOW_DEV_SECRET_ENV] = '1';
+    }
+
+    // One manager, shared. Issuing and verifying under two independently
+    // constructed managers is what made the demo's commit phase fail with
+    // `bad_signature` while the random per-instance secret was in place;
+    // sharing the instance makes the demo independent of how the secret
+    // happens to be resolved.
+    const tokenManager = new TokenManager();
+    this.proposer = new ToolProposer(tokenManager);
+    this.verifier = new CommitVerifier(tokenManager);
     this.tracer = new Tracer('mcp-server');
   }
 

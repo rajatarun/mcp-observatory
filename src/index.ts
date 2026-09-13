@@ -25,6 +25,13 @@ export {
   computePromptHash,
 } from './utils/hashing.js';
 export {
+  InsecureDefaultSecretError,
+  resolveSecret,
+  COMMIT_SECRET_ENV,
+  ALLOW_DEV_SECRET_ENV,
+  DEV_COMMIT_SECRET,
+} from './utils/secrets.js';
+export {
   getCurrentTimeMs,
   getCurrentTimeIso,
   addMs,

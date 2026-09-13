@@ -1,5 +1,10 @@
 import { createHmac, randomBytes } from 'crypto';
 import { getCurrentTimeMs, addMs } from '../utils/time.js';
+import {
+  COMMIT_SECRET_ENV,
+  DEV_COMMIT_SECRET,
+  resolveSecret,
+} from '../utils/secrets.js';
 
 export interface TokenPayload {
   tokenId: string;
@@ -22,8 +27,29 @@ export class TokenManager {
   private secret: Buffer;
   private tokenExpiryMs: number = 300000; // 5 minutes
 
+  /**
+   * @param secret HMAC key for commit tokens. Falls back to
+   * `MCP_OBSERVATORY_COMMIT_SECRET`. Throws `InsecureDefaultSecretError`
+   * when neither is set, unless `MCP_OBSERVATORY_ALLOW_DEV_SECRET=1`.
+   *
+   * This used to default to `randomBytes(32)`, which made the key
+   * per-instance: a restarted or scaled-out process could not verify a
+   * token it had issued, and the proposer and the verifier — each of which
+   * builds its own `TokenManager` when none is supplied — never shared a
+   * key at all. Both failures surfaced as `bad_signature`, which is what a
+   * forgery looks like, so missing configuration was indistinguishable
+   * from an attack. Resolving the secret explicitly moves that failure to
+   * construction time, where the message can name the cause.
+   */
   constructor(secret?: string) {
-    this.secret = secret ? Buffer.from(secret) : randomBytes(32);
+    this.secret = Buffer.from(
+      resolveSecret(secret, {
+        envVar: COMMIT_SECRET_ENV,
+        devDefault: DEV_COMMIT_SECRET,
+        label: COMMIT_SECRET_ENV,
+      }),
+      'utf8'
+    );
   }
 
   issueToken(options: {
