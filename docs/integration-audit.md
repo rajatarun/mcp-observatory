@@ -107,14 +107,57 @@ Three consequences, in increasing order of awkwardness:
    dashboard, silently. The four vendored copies E2 wants to delete are, right
    now, the only reason any telemetry is visible.
 
-**This is a decision, not a bug.** Either the readers learn to query `SPAN#`
-and the tool-name partitions, or the library exporter adopts
-`OBSERVATORY#{operation}`, or the table gains a GSI on `service`/`operation` so
-reads stop depending on partition-key prefix conventions at all. Each has a
-different migration cost for rows already written. It is recorded in
-`contracts/observatory_metrics_item.json` under `namespace_registry`, where
-unread namespaces are marked `status: unread` so the gap is machine-readable
-rather than folklore.
+**This was a decision, not a bug, and the decision has been taken: the GSI.**
+
+Three options were on the table — teach the readers the other namespaces, make
+the library exporter adopt `OBSERVATORY#{operation}`, or stop reads depending
+on the partition key at all. The first two leave the portfolio one careless
+writer away from the same silence; only the third removes the class of defect.
+
+**What was built.** `SpanTimelineIndex` on the shared table, keyed `span_date`
+(a UTC `YYYY-MM-DD` bucket) + `timestamp` (ISO 8601 UTC), projection ALL. A
+reader queries the days it wants and filters in memory; it never needs to know
+what prefix a writer chose. The base-table `pk` becomes each writer's own
+business.
+
+**Why a date bucket rather than keying on `operation`.** Keying the index on
+`operation` — the obvious candidate — would have traded a pk-prefix convention
+for an operation-name convention: a reader wanting everything still has to
+enumerate the values, and a writer inventing `invoke_tool` is invisible again.
+A date bucket requires no shared vocabulary at all. It also matches what both
+readers already do, which is query one partition over a time range and
+aggregate in memory.
+
+**The trap this does not remove, and how it is held closed.** A GSI indexes
+only items carrying *both* key attributes, so a writer that omits `span_date`
+or `timestamp` is exactly as invisible as it was before. That is why contract
+v2.0.0 promotes `span_date`, `timestamp` and `operation` from recommended to
+required (invariants I6–I8), and why every writer's repository has a
+conformance test asserting them. The difference worth having is not that
+invisibility became impossible — it is that it became a test failure instead of
+a silence.
+
+**Deployment order matters and no test can enforce it:**
+
+1. Deploy the shared stack and wait for `SpanTimelineIndex` to reach `ACTIVE`.
+   AWS creates at most one GSI per `UpdateTable`, so it must go out as its own
+   change, and the backfill is not instant.
+2. Deploy the writers, which must emit the three required attributes.
+3. Switch the readers onto the index.
+
+Readers were given a fallback to the legacy `pk` queries, triggered only by
+index-absence, so step 3 is not order-sensitive in practice.
+
+**Not retroactive.** Rows written before `span_date` existed carry no index key
+and will never appear in `SpanTimelineIndex`. They remain reachable only by
+their original `pk`, which is why `namespace_registry` and `readers_for()` are
+kept — demoted to `legacy-informational`, answering a historical question.
+Backfilling those rows is a separate migration and is not attempted here.
+
+**Hot partition, stated honestly.** One index partition per day means the
+current day takes every write. At this portfolio's volume that sits well inside
+what on-demand adaptive capacity absorbs; if write rates grow, bucket by hour
+rather than reintroducing a category-based partition key.
 
 ---
 
