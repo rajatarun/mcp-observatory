@@ -2,16 +2,18 @@
 
 All notable changes to this package are documented in this file.
 
-## [0.4.1] - 2026-09-13
-
-Republished as 0.4.1. `0.4.0` was never published: an earlier `npm publish`
-attempt failed on the registry's authentication check partway through the
-upload, leaving an orphaned staged version behind. npm has no self-service
-way to clear a stuck stage, so `0.4.0` cannot be used for any release of
-this package; `0.4.1` carries the identical changes described below. No
-code differs between what was intended as 0.4.0 and this release.
-
 ## [0.4.0] - 2026-09-13
+
+**Note on the publish history:** the first `npm publish` attempt for this
+version failed partway through (the workflow's `GITHUB_TOKEN` lacked
+`contents: write`, so the release step failed after the npm upload had
+already staged the version), which looked at the time like `0.4.0` itself
+was unusable and this package was briefly bumped to `0.4.1` to work around
+it. That bump was never published — re-running the fixed workflow against
+the original commit completed the `0.4.0` publish that had actually stuck,
+so `0.4.0` is the real, live, and only correct version number for this
+release. The `0.4.1` entry that briefly existed here has been removed as
+inaccurate; no code differs between what was tagged 0.4.1 and this release.
 
 Three hardening changes brought over from the Python package's 0.3.0. Two are
 **breaking**: construction can now throw, and calls that were previously
