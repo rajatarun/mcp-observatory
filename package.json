@@ -1,6 +1,6 @@
 {
   "name": "@weaveaijs/mcp-observatory",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Observability and APM toolkit for MCP servers",
   "type": "module",
   "main": "dist/index.js",
