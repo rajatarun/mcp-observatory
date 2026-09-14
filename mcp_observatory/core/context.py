@@ -19,6 +19,12 @@ class TraceContext:
     """Represents telemetry for a single MCP interaction span."""
 
     service: str
+    # The kind of call this span represents ("invoke_model", "invoke_agent",
+    # "invoke_tool", ...). Every consumer of this library had invented its own
+    # copy of this concept in a vendored exporter, which is a large part of why
+    # the shared metrics table ended up with several incompatible row shapes.
+    # It belongs here, on the span, so there is one spelling of it.
+    operation: Optional[str] = None
     model: Optional[str] = None
     tool_name: Optional[str] = None
     trace_id: str = field(default_factory=_new_id)

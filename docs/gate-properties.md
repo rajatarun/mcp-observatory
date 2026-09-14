@@ -170,6 +170,56 @@ grace closes it if the application clock itself runs backwards.
 
 ---
 
+## P6 — Channel binding
+
+**Proposition.** If commit verification returns `ok` and the token carries a
+`required_cipher_profile`, then the channel the executor presented is at least
+as strong as that profile on the order
+`CHEAP < BALANCED < HARDENED < QUANTUM_SAFE`. The requirement may be raised
+between propose and commit but never lowered.
+
+*Proof.* The field is inside the signed payload, so by P3 any edit — changing
+the value or removing the field — is a MAC forgery and rejects with
+`bad_signature`. The verifier's guard compares the presented channel against
+the signed value and returns `channel_below_required_profile` unless the
+channel places at least as high on the lattice; a channel it cannot place at
+all satisfies nothing, and a requirement it cannot place is enforced at maximum.
+The only other way the requirement can change is a verifier re-evaluating and
+enforcing the join of the signed value with a fresh one, and a join over a
+totally ordered lattice returns a least upper bound — something at least as
+strong. ∎
+
+**Placement.** The guard sits after the argument-hash check and *before*
+`nonce_seen`. That call marks the nonce spent on first sight, so a guard after
+it would burn the token on a rejection and make the correct retry impossible.
+`test_a_refused_channel_does_not_burn_the_nonce` pins this.
+
+**What P6 does not say.** It binds the executor's *claim* about its channel,
+not the wire. Nothing in this library measures transport strength, so a lying
+executor is outside the model in the same way key compromise is outside P3.
+This is a real limitation, not a formality: the property is only as good as the
+honesty of whatever calls `verify_commit`.
+
+### Why the profile is injected, not imported
+
+The profile is produced by a separate policy service — CipherWeave is the one
+this was designed against. The proposer takes an optional async
+`channel_profile_provider` rather than importing that service, because this
+library is a dependency of several unrelated products and most of them run no
+channel policy. Importing the producer would make every consumer depend on it,
+and an `ImportError` inside the gate would fail *closed* for a deployment that
+never asked for the feature. The four profile names and their order are
+therefore a contract between the two systems, duplicated deliberately in
+`proposal_commit/channel.py`; changing it needs a version field in the token,
+not a shared import.
+
+A deployment with no provider binds no requirement and behaves exactly as
+before — and cannot be forged into that state, since removing the field breaks
+the signature. `CommitVerifier(require_channel_binding=True)` refuses tokens
+that carry no requirement, for deployments where every token should have one.
+
+---
+
 ## P5 — Cost
 
 Let `|a|` be the serialised argument size and `|t|` the length of a text

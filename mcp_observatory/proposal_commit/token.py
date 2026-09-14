@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from ..utils.secrets import resolve_secret
+from .channel import normalise_profile
 
 
 def _decode_canonical(segment: str) -> bytes:
@@ -64,7 +65,17 @@ class CommitTokenManager:
         tool_name: str,
         tool_args_hash: str,
         composite_score: float,
+        required_cipher_profile: str | None = None,
     ) -> TokenIssueResult:
+        """Mint a commit token bound to this exact call.
+
+        ``required_cipher_profile`` binds the channel strength the call must run
+        over (see ``channel.py``). It is omitted from the payload when ``None``,
+        which is the honest encoding for a deployment running no channel policy:
+        the issuer makes no claim, so the verifier has nothing to enforce. The
+        field cannot be stripped by an attacker to reach that state, because it
+        sits inside the signed payload — removing it invalidates the signature.
+        """
         issued_at = int(time())
         token_payload = {
             "token_id": str(uuid4()),
@@ -76,6 +87,8 @@ class CommitTokenManager:
             "nonce": str(uuid4()),
             "composite_score": composite_score,
         }
+        if required_cipher_profile is not None:
+            token_payload["required_cipher_profile"] = normalise_profile(required_cipher_profile)
         payload_raw = json.dumps(token_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         sig = hmac.new(self.secret, payload_raw, sha256).digest()
         token = f"{base64.urlsafe_b64encode(payload_raw).decode()}.{base64.urlsafe_b64encode(sig).decode()}"

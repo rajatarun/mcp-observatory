@@ -1,2 +1,10 @@
 __pycache__/
 *.py[cod]
+
+# Node build artifacts. This repository also carries a TypeScript package on the
+# `main-nodejs` branch line; building or installing it leaves dist/ and
+# node_modules/ in the working tree. They are foreign to the Python package and
+# must never be committed here — without these entries a `git add -A` would add
+# the entire npm dependency tree to the PyPI distribution.
+dist/
+node_modules/
