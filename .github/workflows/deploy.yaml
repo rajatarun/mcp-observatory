@@ -48,7 +48,37 @@ jobs:
           name: python-package-distributions
           path: dist/
 
+      # PyPI refuses to overwrite an existing file, so publishing on every push
+      # to main meant any push that did not bump the version failed the whole
+      # pipeline -- including pushes that changed no packaged code at all. The
+      # version is checked first and the upload skipped when it is already
+      # released, so "nothing new to publish" is a normal outcome rather than a
+      # red build. A genuine upload failure still fails, because only the
+      # already-released case is skipped.
+      - name: Check whether this version is already on PyPI
+        id: version-check
+        run: |
+          # Read the version off the artifact that is about to be uploaded
+          # rather than off pyproject.toml: this job downloads dist/ and never
+          # checks the repo out, and the built filename is the version that
+          # will actually be published.
+          WHEEL="$(ls dist/*.whl | head -n1)"
+          VERSION="$(basename "${WHEEL}" | cut -d- -f2)"
+          if [ -z "${VERSION}" ]; then
+            echo "could not determine version from ${WHEEL}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          if curl -sSfo /dev/null "https://pypi.org/pypi/mcp-observatory/${VERSION}/json"; then
+            echo "mcp-observatory ${VERSION} is already on PyPI; nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "mcp-observatory ${VERSION} is not on PyPI; publishing."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish package to PyPI
+        if: steps.version-check.outputs.publish == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
   push-rag-artifacts:

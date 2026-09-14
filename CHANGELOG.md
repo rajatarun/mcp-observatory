@@ -3,6 +3,69 @@
 All notable changes to `mcp-observatory` are documented here. This file
 starts at 0.3.0; earlier history is in `git log`.
 
+## 0.4.0
+
+Everything below has been on `main` since 0.3.0 and was never released: the
+version was not bumped, so the publish job kept trying to upload 0.3.0 over
+itself and PyPI kept refusing it. This release is the bump that carries it.
+
+### Added
+
+- **Channel binding (gate property P6).** The commit token can carry the
+  channel strength a call must run over, so an executor cannot quietly
+  downgrade the transport for a call authorised on the assumption of a strong
+  one. `ToolProposer` takes an optional `channel_profile_provider`; absent,
+  nothing is bound and behaviour is unchanged; present but raising, the call
+  is bound to `QUANTUM_SAFE`, because a policy service that could not be
+  reached has not said "unconstrained". `CommitVerifier` enforces it *before*
+  the nonce is seen or spent, so a refusal over a weak channel stays retryable
+  over a strong one instead of becoming a dead authorisation. The profile sits
+  inside the signed payload, so stripping or downgrading it is a forgery, and
+  it is omitted rather than set to null when no policy ran — a deployment that
+  never opted in emits byte-identical tokens. See `docs/gate-properties.md`.
+
+  The profile names are duplicated rather than imported from the service that
+  produces them: this library has several unrelated consumers, most of which
+  run no channel policy, and an ImportError inside the gate would fail closed
+  for a deployment that never asked for the feature.
+
+- **`TraceContext.operation`.** Every consumer had reinvented this concept in
+  its own vendored exporter, which is much of why the shared metrics table
+  fragmented. It belongs on the span.
+
+- **`contracts/` in the repository.** The OBSERVATORY_METRICS item shape is a
+  cross-repository interface with writers in two languages and readers that
+  cannot see them, so it is pinned here (v2.0.0) with a dependency-free
+  validator. Note it is *not* installed by pip: it lives at the repository
+  root and `packages.find` only includes `mcp_observatory*`, so consumers
+  vendor a copy from the repository rather than importing it from the
+  installed package. Every sibling repository currently does exactly that and
+  their copies are byte-identical. Shipping it as package data would need it
+  moved under `mcp_observatory/`, which is a deliberate change and not one
+  smuggled into a release that exists to unbreak publishing.
+
+### Changed
+
+- **The DynamoDB exporter emits `operation`, `timestamp` and `span_date`.**
+  Reads on the shared table used to go through the partition key, so a
+  writer's rows were visible only if it had guessed the prefix grammar the
+  reader enumerated — and this exporter's `SPAN#` rows were read by nothing at
+  all, meaning migrating a service onto this library removed it from every
+  dashboard. Reads now go through a `span_date`/`timestamp` GSI, and these
+  three attributes are what put a row in it. `span_date` is derived from the
+  same timestamp string the row is indexed by, because two clock reads can
+  straddle midnight and file a row under a day it did not happen on.
+
+  Additive: no attribute was removed or renamed, so nothing that reads these
+  rows today breaks.
+
+### Notes
+
+- No breaking changes. Every new parameter is optional and every new payload
+  field is omitted when unused.
+- `docs/integration-audit.md` records the cross-repository audit these changes
+  came out of, including the defects found in sibling repositories.
+
 ## 0.3.0
 
 **This is the first release where the propose/commit gate's documented
