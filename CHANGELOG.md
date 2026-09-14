@@ -2,6 +2,58 @@
 
 All notable changes to this package are documented in this file.
 
+## [0.5.0] - 2026-09-14
+
+Closes the gap between this package and the Python line. The JS package had
+fallen behind on two things that mattered and one that was quietly causing
+damage.
+
+### Added
+
+- **A DynamoDB span exporter (`DynamoDBSpanExporter`).** There was none, so
+  every Node consumer hand-rolled its own writer for the shared
+  OBSERVATORY_METRICS table — which is exactly how that table ended up with
+  several mutually incompatible row shapes, one of them rejected outright by
+  DynamoDB for the life of the integration while reporting success. The item
+  shape is a cross-repository interface, now vendored here as
+  `contracts/observatory_metrics_item.json` (v2.0.0) and shipped in the
+  package, so consumers can delete their copies instead of re-deriving it.
+  The exporter emits `span_date`/`timestamp`/`operation` (the SpanTimelineIndex
+  keys, contract invariants I6-I8) from a single clock reading — two readings
+  can straddle midnight and file a row under a day it did not happen on.
+  `@aws-sdk/client-dynamodb` is an **optional** peer dependency, loaded lazily
+  through a non-literal specifier, so consumers that never write to DynamoDB
+  neither install it nor pay for it.
+
+- **Channel binding (gate property P6).** The commit token can now carry the
+  channel strength a call must run over, so an executor cannot quietly
+  downgrade the transport for a call authorised on the assumption of a strong
+  one. `ToolProposer` takes an optional `channelProfileProvider`; absent, no
+  requirement is bound and nothing changes; present but throwing, the call is
+  bound to `QUANTUM_SAFE`, because a policy service that could not be reached
+  has not said "unconstrained". `CommitVerifier` enforces it **before** the
+  nonce is inspected or burned, so a refusal over a weak channel stays
+  retryable over a strong one rather than becoming a permanently dead
+  authorisation. The profile is inside the signed payload, so it cannot be
+  stripped or downgraded without invalidating the MAC, and it is omitted
+  entirely — not set to null — when no policy ran, so existing deployments
+  emit byte-identical tokens.
+
+  Note a divergence from the Python line that had to be handled here: in this
+  package a `review` verdict also returns a usable commit token, where in
+  Python only `allow` mints one. Both mint sites bind the requirement. An
+  unbound review token would be a way around P6, not a lesser form of it.
+
+- **`operation` on the span** (`TraceContext`/`TraceSpan`). Every consumer had
+  invented its own copy of this concept in its hand-rolled exporter, which is
+  much of why the table fragmented. It belongs on the span.
+
+### Notes
+
+- Nothing here is a breaking change: the new constructor arguments are
+  optional, the new payload field is omitted when unused, and the exporter is
+  opt-in.
+
 ## [0.4.1] - 2026-09-13
 
 Republished. `0.4.1` and `0.4.0` (below) carry identical code — verified

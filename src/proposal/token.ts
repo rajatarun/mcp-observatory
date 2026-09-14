@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from 'crypto';
 import { getCurrentTimeMs, addMs } from '../utils/time.js';
+import { normaliseProfile } from './channel.js';
 import {
   COMMIT_SECRET_ENV,
   DEV_COMMIT_SECRET,
@@ -15,6 +16,16 @@ export interface TokenPayload {
   expiresAt: number;
   nonce: string;
   compositeScore: number;
+  /**
+   * The channel strength this call must run over (gate property P6).
+   *
+   * Omitted entirely — not set to null — when the issuer runs no channel
+   * policy. That is the honest encoding: the issuer makes no claim, so the
+   * verifier has nothing to enforce, and a deployment that never opted in
+   * produces tokens byte-identical to before. An attacker cannot strip the
+   * field to reach that state, because it sits inside the signed payload.
+   */
+  requiredCipherProfile?: string;
 }
 
 export interface TokenVerificationResult {
@@ -116,6 +127,7 @@ export class TokenManager {
     toolArgsHash: string;
     compositeScore: number;
     expiryMs?: number;
+    requiredCipherProfile?: string;
   }): { token: string; payload: TokenPayload } {
     const now = getCurrentTimeMs();
     const expiryMs = options.expiryMs || this.tokenExpiryMs;
@@ -130,6 +142,12 @@ export class TokenManager {
       nonce: randomBytes(16).toString('hex'),
       compositeScore: options.compositeScore,
     };
+
+    // Added only when a policy actually spoke, so the absent case stays
+    // distinguishable from an explicit "unconstrained".
+    if (options.requiredCipherProfile !== undefined && options.requiredCipherProfile !== null) {
+      payload.requiredCipherProfile = normaliseProfile(options.requiredCipherProfile);
+    }
 
     const signature = this.sign(payload);
     const token = Buffer.from(
