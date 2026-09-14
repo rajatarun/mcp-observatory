@@ -1,3 +1,4 @@
+import { normaliseProfile, STRONGEST_PROFILE } from './channel.js';
 import { randomUUID } from 'crypto';
 import { hashJson } from '../utils/hashing.js';
 import { argsExceedLimit } from '../utils/limits.js';
@@ -32,13 +33,44 @@ export interface ScoringOptions {
   promptDrift?: number;
 }
 
+export type ChannelProfileProvider = (
+  toolName: string,
+  toolArgs: Record<string, unknown>,
+) => Promise<string> | string;
+
 export class ToolProposer {
   private tokenManager: TokenManager;
   private blockThreshold: number = 0.7;
   private reviewThreshold: number = 0.4;
+  private channelProfileProvider?: ChannelProfileProvider;
 
-  constructor(tokenManager?: TokenManager) {
+  /**
+   * `channelProfileProvider` names the channel strength a call must run over
+   * (gate property P6). It is injected rather than imported: this package is a
+   * dependency of several unrelated products, most of which run no channel
+   * policy, so importing the service that produces the profile would make
+   * every consumer depend on it.
+   *
+   * Absent, nothing is bound and behaviour is unchanged. Present but throwing,
+   * the call is bound to the strongest profile — a policy service that could
+   * not be reached has not said "unconstrained".
+   */
+  constructor(tokenManager?: TokenManager, options?: { channelProfileProvider?: ChannelProfileProvider }) {
     this.tokenManager = tokenManager || new TokenManager();
+    this.channelProfileProvider = options?.channelProfileProvider;
+  }
+
+  /** Ask the channel policy what this call needs; fail secure if it cannot say. */
+  private async requiredChannelProfile(
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+  ): Promise<string | undefined> {
+    if (!this.channelProfileProvider) return undefined;
+    try {
+      return normaliseProfile(await this.channelProfileProvider(toolName, toolArgs));
+    } catch {
+      return STRONGEST_PROFILE;
+    }
   }
 
   async propose(options: ProposalOptions): Promise<ProposalResult> {
@@ -87,11 +119,18 @@ export class ToolProposer {
     }
 
     if (compositeScore > this.reviewThreshold) {
+      // `review` mints a usable token in this package, unlike the Python line
+      // where only `allow` does, so it must carry the same binding. An
+      // unbound review token would be a way around P6, not a lesser form of it.
+      const requiredCipherProfile = await this.requiredChannelProfile(
+        options.toolName, options.toolArgs,
+      );
       const { token } = this.tokenManager.issueToken({
         proposalId,
         toolName: options.toolName,
         toolArgsHash,
         compositeScore,
+        requiredCipherProfile,
       });
 
       return {
@@ -101,11 +140,15 @@ export class ToolProposer {
       };
     }
 
+    const requiredCipherProfile = await this.requiredChannelProfile(
+      options.toolName, options.toolArgs,
+    );
     const { token } = this.tokenManager.issueToken({
       proposalId,
       toolName: options.toolName,
       toolArgsHash,
       compositeScore,
+      requiredCipherProfile,
     });
 
     return {

@@ -5,6 +5,14 @@ export interface TraceSpan {
   traceId: string;
   parentSpanId?: string;
   service: string;
+  /**
+   * The kind of call this span represents ("invoke_model", "invoke_agent",
+   * "invoke_tool", ...). Every consumer of this package had invented its own
+   * copy of this concept in a hand-rolled exporter, which is a large part of
+   * why the shared metrics table ended up with several row shapes. It belongs
+   * on the span so there is one spelling of it.
+   */
+  operation?: string;
   model?: string;
   toolName?: string;
   startTime: Date;
@@ -24,6 +32,7 @@ export class TraceContext {
   readonly traceId: string;
   readonly parentSpanId?: string;
   readonly service: string;
+  readonly operation?: string;
   readonly model?: string;
   readonly toolName?: string;
   readonly startTime: Date;
@@ -39,6 +48,7 @@ export class TraceContext {
 
   constructor(options: {
     service: string;
+    operation?: string;
     model?: string;
     toolName?: string;
     traceId?: string;
@@ -48,6 +58,7 @@ export class TraceContext {
     this.traceId = options.traceId || randomUUID();
     this.parentSpanId = options.parentSpanId;
     this.service = options.service;
+    this.operation = options.operation;
     this.model = options.model;
     this.toolName = options.toolName;
     this.startTime = new Date();
@@ -63,6 +74,7 @@ export class TraceContext {
       traceId: this.traceId,
       parentSpanId: this.parentSpanId,
       service: this.service,
+      operation: this.operation,
       model: this.model,
       toolName: this.toolName,
       startTime: this.startTime,

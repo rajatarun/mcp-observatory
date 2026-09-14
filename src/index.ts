@@ -9,6 +9,15 @@ export { TokenManager } from './proposal/token.js';
 export { ToolProposer } from './proposal/proposer.js';
 export { CommitVerifier } from './proposal/verifier.js';
 export {
+  PROFILE_STRENGTH,
+  STRONGEST_PROFILE,
+  CHANNEL_BELOW_REQUIRED_PROFILE,
+  channelSatisfies,
+  normaliseProfile,
+} from './proposal/channel.js';
+export type { ChannelProfileProvider } from './proposal/proposer.js';
+export { DynamoDBSpanExporter, buildItem, TABLE_NAME_ENV } from './aws/dynamodbExporter.js';
+export {
   InMemoryProposalStorage,
   PostgresProposalStorage,
 } from './proposal/storage.js';

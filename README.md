@@ -218,6 +218,15 @@ await storage.close();
 - **`proposer.ts`**: ToolProposer with risk-based decisioning
 - **`verifier.ts`**: CommitVerifier with replay protection
 - **`storage.ts`**: In-memory and PostgreSQL storage backends
+- **`channel.ts`**: Channel binding (gate property P6) — binds into the commit
+  token the channel strength a call must run over, so an executor cannot
+  downgrade the transport for a call authorised on the assumption of a strong
+  one. Opt-in: supply a `channelProfileProvider` to `ToolProposer`.
+- **`aws/dynamodbExporter.ts`**: Writes finished spans to the shared
+  OBSERVATORY_METRICS table in the shape pinned by
+  `contracts/observatory_metrics_item.json`. `@aws-sdk/client-dynamodb` is an
+  optional peer dependency, loaded lazily — consumers that do not export to
+  DynamoDB neither install it nor pay for it.
 
 ### Assessment (`src/hallucination`, `src/risk`)
 

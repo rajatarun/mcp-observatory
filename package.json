@@ -1,13 +1,14 @@
 {
   "name": "@weaveaijs/mcp-observatory",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Observability and APM toolkit for MCP servers",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "sql"
+    "sql",
+    "contracts"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -59,5 +60,13 @@
     "eslint": "^8.0.0",
     "glob": "^10.5.0",
     "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-dynamodb": {
+      "optional": true
+    }
   }
 }
