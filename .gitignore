@@ -8,3 +8,6 @@ __pycache__/
 # the entire npm dependency tree to the PyPI distribution.
 dist/
 node_modules/
+
+# selftest scratch (written and removed by e2e/selftest.py)
+e2e/_selftest_env.json

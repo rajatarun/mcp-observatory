@@ -41,3 +41,12 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["mcp_observatory*"]
+
+[tool.pytest.ini_options]
+# `pytest` with no arguments runs the unit suite only. e2e/ talks to deployed
+# stacks and is opt-in: `pytest e2e/` or `./e2e/run_e2e.sh`.
+#
+# This is a safety boundary, not tidiness. The publish workflow assumes an AWS
+# role, so a bare `pytest` in a job that has credentials would otherwise collect
+# the live suite and run it against production.
+testpaths = ["tests"]
