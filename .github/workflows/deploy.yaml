@@ -9,6 +9,20 @@ permissions:
   contents: read
   id-token: write
 
+env:
+  # The same OIDC role every other repository in the portfolio assumes, and the
+  # same one TeamWeave and ai-content-orchestrator already use to write to this
+  # exact bucket. It is an account id and a role name, not a credential -- the
+  # role's trust policy is what gates it -- so it lives here in the open, as it
+  # does in the sibling workflows.
+  #
+  # This was `secrets.AWS_RAG_ARTIFACTS_ROLE_ARN`, which is not set on this
+  # repository. An unset secret makes role-to-assume an empty string, and
+  # configure-aws-credentials then reports "Could not load credentials from any
+  # providers" -- which reads like a broken OIDC trust policy rather than a
+  # name that resolves to nothing.
+  AWS_RAG_ARTIFACTS_ROLE_ARN: arn:aws:iam::239571291755:role/teamweave-github-actions-sam-deployer
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -94,7 +108,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_RAG_ARTIFACTS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_RAG_ARTIFACTS_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: Push md and puml files to S3
