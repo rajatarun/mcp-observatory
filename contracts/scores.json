@@ -1,0 +1,53 @@
+{
+  "$comment": "Every score mcp-observatory emits, declared against contracts/score_envelope.json (vendored from ContextWeave). tests/test_score_contract.py holds this file to the contract and resolves every producer.",
+  "scores": [
+    {
+      "name": "observatory.composite_risk_score",
+      "kind": "risk_indicator",
+      "range": [0, 1],
+      "source": "heuristic",
+      "calibrated": false,
+      "evidence": "signals_defined: how many of the risk indicators could be computed",
+      "meaning": "Weighted mean of lexical risk indicators over the defined set, renormalised. Not a probability of harm; comparable only at equal signals_defined. Null when no indicator is defined.",
+      "producer": "mcp_observatory.risk.scoring:composite_risk_score"
+    },
+    {
+      "name": "observatory.hallucination_risk_score",
+      "kind": "risk_indicator",
+      "range": [0, 1],
+      "source": "heuristic",
+      "calibrated": false,
+      "evidence": "number of defined component signals",
+      "meaning": "Weighted blend of grounding, self-consistency, verifier, numeric variance and tool-claim mismatch; hand-set weights, never compared with an outcome.",
+      "producer": "mcp_observatory.hallucination.scoring:compute_hallucination_risk_score"
+    },
+    {
+      "name": "observatory.grounding_score",
+      "kind": "score",
+      "range": [0, 1],
+      "source": "measurement",
+      "calibrated": false,
+      "meaning": "Lexical overlap between an answer and the retrieved context. Null without context.",
+      "producer": "mcp_observatory.hallucination.signals:compute_grounding_score"
+    },
+    {
+      "name": "observatory.self_consistency_score",
+      "kind": "score",
+      "range": [0, 1],
+      "source": "measurement",
+      "calibrated": false,
+      "meaning": "Agreement between two generations of the same answer. Null without a second generation.",
+      "producer": "mcp_observatory.hallucination.signals:compute_self_consistency_score"
+    },
+    {
+      "name": "observatory.proposal_composite_score",
+      "kind": "risk_indicator",
+      "range": [0, 1],
+      "source": "heuristic",
+      "calibrated": false,
+      "evidence": "number of defined signals in the proposal",
+      "meaning": "Weighted composite of a proposed tool call's risk signals in the propose/commit flow.",
+      "producer": "mcp_observatory.proposal_commit.scoring:composite_score"
+    }
+  ]
+}
