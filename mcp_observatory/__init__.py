@@ -5,7 +5,14 @@ from .execution import TieredExecutionConfig, TieredExecutionEngine
 from .hallucination.config import HallucinationConfig
 from .instrument import instrument, instrument_mcp_server, instrument_wrapper_api
 from .core.wrapper_api import InvocationWrapperAPI, WrapperDecision, WrapperPolicy, WrapperResult
-from .proposal_commit import CommitTokenManager, CommitVerifier, ProposalConfig, ToolProposer
+from .exporters import SQLiteSpanExporter
+from .proposal_commit import (
+    CommitTokenManager,
+    CommitVerifier,
+    ProposalConfig,
+    SQLiteProposalCommitStorage,
+    ToolProposer,
+)
 
 __all__ = [
     "instrument",
@@ -22,5 +29,7 @@ __all__ = [
     "CommitTokenManager",
     "CommitVerifier",
     "ProposalConfig",
+    "SQLiteProposalCommitStorage",
+    "SQLiteSpanExporter",
     "ToolProposer",
 ]

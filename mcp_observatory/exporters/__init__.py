@@ -1,8 +1,9 @@
 """Exporter implementations for MCP Observatory."""
 
 from .base import Exporter
+from .sqlite import SQLiteSpanExporter
 
-__all__ = ["Exporter", "PostgresExporter"]
+__all__ = ["Exporter", "PostgresExporter", "SQLiteSpanExporter"]
 
 
 def __getattr__(name: str):
