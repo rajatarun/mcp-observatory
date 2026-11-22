@@ -192,6 +192,17 @@ nothing, and it looks exactly like a passing test.
 
 ---
 
+## What came of it
+
+`e2e/` is the suite these outputs made possible: it resolves every coordinate
+from `describe-stacks` and tests the seams between services — the claims in
+`ContextWeave/docs/weave-platform.md` §2 that no repository's own suite can
+check, because a seam has two sides and neither repo can import the other.
+
+It is read-mostly, skips (never fails) on a stack that is absent, and reads no
+secret. `e2e/selftest.py` proves its assertions bite by mutating a fake
+platform thirteen ways and checking each break is caught.
+
 ## What this does not cover
 
 - **AuthChain** — excluded by request. Its stack publishes `ApiBaseUrl` and the
