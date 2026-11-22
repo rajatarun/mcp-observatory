@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
-import asyncpg
+from typing import TYPE_CHECKING, Optional
 
 from ..core.context import TraceContext
 from .base import Exporter
+
+if TYPE_CHECKING:
+    import asyncpg
+
+
+def _import_asyncpg():
+    try:
+        import asyncpg
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError(
+            "PostgresExporter needs asyncpg. Install it with `pip install mcp-observatory[postgres]`."
+        ) from exc
+    return asyncpg
 
 
 INSERT_SQL = """
@@ -68,7 +79,8 @@ class PostgresExporter(Exporter):
         if not self._dsn:
             raise ValueError("Either `dsn` or `pool` must be provided for PostgresExporter.")
 
-        self._pool = await asyncpg.create_pool(dsn=self._dsn, min_size=self._min_size, max_size=self._max_size)
+        asyncpg_mod = _import_asyncpg()
+        self._pool = await asyncpg_mod.create_pool(dsn=self._dsn, min_size=self._min_size, max_size=self._max_size)
 
     async def export(self, context: TraceContext) -> None:
         if self._pool is None:

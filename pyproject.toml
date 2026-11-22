@@ -20,11 +20,12 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Software Development :: Libraries",
 ]
-dependencies = [
-  "asyncpg>=0.29.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
+postgres = [
+  "asyncpg>=0.29.0",
+]
 openai = [
   "openai>=1.40.0",
 ]
