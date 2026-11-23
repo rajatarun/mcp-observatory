@@ -2,8 +2,22 @@
 
 from .base import Exporter
 from .sqlite import SQLiteSpanExporter
+from .sync_bridge import (
+    EncryptedSyncBridge,
+    SyncBatchResult,
+    decrypt_envelope,
+    encrypt_spans,
+)
 
-__all__ = ["Exporter", "PostgresExporter", "SQLiteSpanExporter"]
+__all__ = [
+    "EncryptedSyncBridge",
+    "Exporter",
+    "PostgresExporter",
+    "SQLiteSpanExporter",
+    "SyncBatchResult",
+    "decrypt_envelope",
+    "encrypt_spans",
+]
 
 
 def __getattr__(name: str):
