@@ -1,6 +1,7 @@
 """Exporter implementations for MCP Observatory."""
 
 from .base import Exporter
+from .query import AuditQueryEngine, verify_audit_bundle
 from .sqlite import SQLiteSpanExporter
 from .sync_bridge import (
     EncryptedSyncBridge,
@@ -10,6 +11,7 @@ from .sync_bridge import (
 )
 
 __all__ = [
+    "AuditQueryEngine",
     "EncryptedSyncBridge",
     "Exporter",
     "PostgresExporter",
@@ -17,6 +19,7 @@ __all__ = [
     "SyncBatchResult",
     "decrypt_envelope",
     "encrypt_spans",
+    "verify_audit_bundle",
 ]
 
 

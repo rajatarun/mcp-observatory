@@ -146,10 +146,56 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit machine-readable JSON output",
     )
+
+    export_cmd = sub.add_parser(
+        "export",
+        help="Export filtered spans to a tamper-evident audit-bundle-v1 file",
+    )
+    export_cmd.add_argument("--db", required=True, help="Path to SQLiteSpanExporter database file")
+    export_cmd.add_argument("--out", required=True, help="Output bundle file path")
+    export_cmd.add_argument(
+        "--format",
+        dest="fmt",
+        default="jsonl",
+        choices=("jsonl", "csv"),
+        help="Export file format (jsonl or csv)",
+    )
+    export_cmd.add_argument("--tool", dest="tool_name", default=None, help="Filter by tool name")
+    export_cmd.add_argument("--status", default=None, help="Filter by span status")
+    export_cmd.add_argument(
+        "--min-risk",
+        dest="min_risk",
+        type=float,
+        default=None,
+        help="Filter by minimum risk score",
+    )
+    export_cmd.add_argument("--since", dest="since_iso", default=None, help="ISO-8601 start time")
+    export_cmd.add_argument("--until", dest="until_iso", default=None, help="ISO-8601 end time")
+    export_cmd.add_argument("--limit", type=int, default=500, help="Maximum spans to export")
+    export_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit machine-readable JSON manifest",
+    )
+
+    verify_cmd = sub.add_parser(
+        "verify-bundle",
+        help="Verify SHA-256 hash chain integrity of an exported audit bundle",
+    )
+    verify_cmd.add_argument("bundle_path", help="Path to exported audit bundle (.jsonl or .csv)")
+    verify_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit machine-readable JSON verification result",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    from mcp_observatory.exporters.query import AuditQueryEngine, verify_audit_bundle
+
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -164,6 +210,52 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(_format_human(stats))
         return 0
+
+    if args.command == "export":
+        try:
+            engine = AuditQueryEngine(args.db)
+            manifest = engine.export_audit_bundle(
+                args.out,
+                fmt=args.fmt,
+                tool_name=args.tool_name,
+                status=args.status,
+                min_risk=args.min_risk,
+                since_iso=args.since_iso,
+                until_iso=args.until_iso,
+                limit=args.limit,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.as_json:
+            print(json.dumps(manifest, indent=2))
+        else:
+            print(
+                f"Exported {manifest['record_count']} spans ({manifest['format']}) "
+                f"to {args.out} [head={manifest['chain_head_sha256'][:12]}...]"
+            )
+        return 0
+
+    if args.command == "verify-bundle":
+        ok, errors = verify_audit_bundle(args.bundle_path)
+        if args.as_json:
+            print(
+                json.dumps(
+                    {
+                        "valid": ok,
+                        "bundle_path": str(args.bundle_path),
+                        "errors": errors,
+                    },
+                    indent=2,
+                )
+            )
+        elif ok:
+            print(f"VALID: {args.bundle_path}")
+        else:
+            print(f"INVALID: {args.bundle_path}", file=sys.stderr)
+            for err in errors:
+                print(f"  - {err}", file=sys.stderr)
+        return 0 if ok else 1
 
     parser.print_help()
     return 1
