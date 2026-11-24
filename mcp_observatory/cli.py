@@ -131,6 +131,43 @@ def _format_human(stats: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_rollup_human(rollup: dict[str, Any]) -> str:
+    p50 = (
+        f"{rollup['p50_latency_ms']:.2f} ms"
+        if rollup["p50_latency_ms"] is not None
+        else "n/a"
+    )
+    p95 = (
+        f"{rollup['p95_latency_ms']:.2f} ms"
+        if rollup["p95_latency_ms"] is not None
+        else "n/a"
+    )
+    lines = [
+        f"MCP Observatory Telemetry Rollup ({rollup['db_path']})",
+        f"  total_events : {rollup['total_events']}",
+        f"  error_rate   : {rollup['error_rate'] * 100:.2f}% ({rollup['error_count']}/{rollup['total_events']})",
+        f"  tokens_in    : {rollup['tokens_in']}",
+        f"  tokens_out   : {rollup['tokens_out']}",
+        f"  cost_usd     : ${rollup['cost_usd']:.6f}",
+        f"  p50_latency  : {p50}",
+        f"  p95_latency  : {p95}",
+    ]
+    by_repo = rollup.get("by_source_repo") or {}
+    if by_repo:
+        lines.append("  by_source_repo:")
+        for repo, stats in by_repo.items():
+            repo_p95 = (
+                f"{stats['p95_latency_ms']:.2f} ms"
+                if stats["p95_latency_ms"] is not None
+                else "n/a"
+            )
+            lines.append(
+                f"    - {repo}: events={stats['total_events']} "
+                f"errors={stats['error_count']} cost=${stats['cost_usd']:.6f} p95={repo_p95}"
+            )
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mcp-observatory",
@@ -189,6 +226,48 @@ def build_parser() -> argparse.ArgumentParser:
         dest="as_json",
         action="store_true",
         help="Emit machine-readable JSON verification result",
+    )
+
+    ingest_cmd = sub.add_parser(
+        "ingest-telemetry",
+        help="Ingest a weave-telemetry-v1 JSONL stream into SQLite WAL storage",
+    )
+    ingest_cmd.add_argument("--db", required=True, help="Path to telemetry SQLite database file")
+    ingest_cmd.add_argument(
+        "--input",
+        dest="input_path",
+        required=True,
+        help="Path to weave-telemetry-v1 JSONL file",
+    )
+    ingest_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit machine-readable JSON ingestion summary",
+    )
+
+    rollup_cmd = sub.add_parser(
+        "rollup",
+        help="Compute latency percentile, error rate, and cost rollups from telemetry events",
+    )
+    rollup_cmd.add_argument("--db", required=True, help="Path to telemetry SQLite database file")
+    rollup_cmd.add_argument(
+        "--repo",
+        dest="source_repo",
+        default=None,
+        help="Filter rollup by source_repo",
+    )
+    rollup_cmd.add_argument(
+        "--since",
+        dest="since_iso",
+        default=None,
+        help="Filter events at or after ISO-8601 timestamp",
+    )
+    rollup_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit machine-readable JSON rollup",
     )
     return parser
 
@@ -256,6 +335,46 @@ def main(argv: list[str] | None = None) -> int:
             for err in errors:
                 print(f"  - {err}", file=sys.stderr)
         return 0 if ok else 1
+
+    if args.command == "ingest-telemetry":
+        from mcp_observatory.exporters.telemetry import TelemetryRollupEngine
+
+        try:
+            with TelemetryRollupEngine(args.db) as engine:
+                summary = engine.ingest_jsonl(args.input_path)
+        except FileNotFoundError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.as_json:
+            print(json.dumps(summary, indent=2))
+        else:
+            print(
+                f"Ingested {summary['ingested']} events "
+                f"(skipped_duplicates={summary['skipped_duplicates']}, invalid={summary['invalid']})"
+            )
+        return 0
+
+    if args.command == "rollup":
+        from mcp_observatory.exporters.telemetry import TelemetryRollupEngine
+
+        db_path = Path(args.db)
+        if str(args.db) != ":memory:" and not db_path.is_file():
+            print(f"Telemetry SQLite database not found: {db_path}", file=sys.stderr)
+            return 1
+        try:
+            with TelemetryRollupEngine(args.db) as engine:
+                rollup = engine.compute_rollup(
+                    source_repo=args.source_repo,
+                    since_iso=args.since_iso,
+                )
+        except (FileNotFoundError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.as_json:
+            print(json.dumps(rollup, indent=2))
+        else:
+            print(_format_rollup_human(rollup))
+        return 0
 
     parser.print_help()
     return 1

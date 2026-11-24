@@ -9,16 +9,24 @@ from .sync_bridge import (
     decrypt_envelope,
     encrypt_spans,
 )
+from .telemetry import (
+    TELEMETRY_SCHEMA,
+    TelemetryRollupEngine,
+    validate_telemetry_event,
+)
 
 __all__ = [
+    "TELEMETRY_SCHEMA",
     "AuditQueryEngine",
     "EncryptedSyncBridge",
     "Exporter",
     "PostgresExporter",
     "SQLiteSpanExporter",
     "SyncBatchResult",
+    "TelemetryRollupEngine",
     "decrypt_envelope",
     "encrypt_spans",
+    "validate_telemetry_event",
     "verify_audit_bundle",
 ]
 
