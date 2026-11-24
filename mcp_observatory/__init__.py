@@ -1,11 +1,17 @@
 """MCP Observatory package."""
 
 from .core.interceptor import V2Config
+from .core.wrapper_api import (
+    InvocationWrapperAPI,
+    WrapperDecision,
+    WrapperPolicy,
+    WrapperResult,
+)
 from .execution import TieredExecutionConfig, TieredExecutionEngine
+from .exporters import SQLiteSpanExporter
+from .fleet_health import FleetHealthAggregator, FleetNodeInput
 from .hallucination.config import HallucinationConfig
 from .instrument import instrument, instrument_mcp_server, instrument_wrapper_api
-from .core.wrapper_api import InvocationWrapperAPI, WrapperDecision, WrapperPolicy, WrapperResult
-from .exporters import SQLiteSpanExporter
 from .proposal_commit import (
     CommitTokenManager,
     CommitVerifier,
@@ -15,21 +21,23 @@ from .proposal_commit import (
 )
 
 __all__ = [
-    "instrument",
-    "instrument_mcp_server",
-    "instrument_wrapper_api",
-    "HallucinationConfig",
-    "TieredExecutionConfig",
-    "TieredExecutionEngine",
-    "V2Config",
-    "InvocationWrapperAPI",
-    "WrapperDecision",
-    "WrapperPolicy",
-    "WrapperResult",
     "CommitTokenManager",
     "CommitVerifier",
+    "FleetHealthAggregator",
+    "FleetNodeInput",
+    "HallucinationConfig",
+    "InvocationWrapperAPI",
     "ProposalConfig",
     "SQLiteProposalCommitStorage",
     "SQLiteSpanExporter",
+    "TieredExecutionConfig",
+    "TieredExecutionEngine",
     "ToolProposer",
+    "V2Config",
+    "WrapperDecision",
+    "WrapperPolicy",
+    "WrapperResult",
+    "instrument",
+    "instrument_mcp_server",
+    "instrument_wrapper_api",
 ]

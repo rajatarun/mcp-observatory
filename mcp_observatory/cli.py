@@ -360,6 +360,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit machine-readable slo-report-v1 JSON output",
     )
+
+    fleet_cmd = sub.add_parser(
+        "fleet-summary",
+        help="Aggregate multi-node health and SLO inputs into fleet-health-v1 JSON",
+    )
+    fleet_cmd.add_argument(
+        "--input",
+        dest="input_path",
+        required=True,
+        help="Path to node health JSON or JSONL file",
+    )
+    fleet_cmd.add_argument(
+        "--fleet-id",
+        dest="fleet_id",
+        required=True,
+        help="Fleet identifier",
+    )
+    fleet_cmd.add_argument(
+        "--stale-after",
+        dest="stale_after",
+        type=int,
+        default=300,
+        help="Mark nodes offline if heartbeat age exceeds this many seconds (default: 300)",
+    )
     return parser
 
 
@@ -498,6 +522,25 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(_format_slo_human(report))
         return 2 if report["status"] == "breach" else 0
+
+    if args.command == "fleet-summary":
+        from mcp_observatory.fleet_health import (
+            FleetHealthAggregator,
+            load_fleet_node_inputs,
+        )
+
+        try:
+            node_inputs = load_fleet_node_inputs(args.input_path)
+            aggregator = FleetHealthAggregator(
+                fleet_id=args.fleet_id,
+                stale_after_seconds=args.stale_after,
+            )
+            summary = aggregator.aggregate(node_inputs)
+        except (FileNotFoundError, TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2))
+        return 0
 
     parser.print_help()
     return 1
