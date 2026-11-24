@@ -168,6 +168,39 @@ def _format_rollup_human(rollup: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _format_slo_human(report: dict[str, Any]) -> str:
+    metrics = report["metrics"]
+    targets = report["targets"]
+    p50 = (
+        f"{metrics['p50_latency_ms']:.2f} ms"
+        if metrics["p50_latency_ms"] is not None
+        else "n/a"
+    )
+    p95 = (
+        f"{metrics['p95_latency_ms']:.2f} ms"
+        if metrics["p95_latency_ms"] is not None
+        else "n/a"
+    )
+    repo_label = report["source_repo"] if report["source_repo"] is not None else "all"
+    lines = [
+        f"MCP Observatory SLO Report ({report['schema']})",
+        f"  status       : {report['status'].upper()}",
+        f"  source_repo  : {repo_label}",
+        f"  window_label : {report['window_label']}",
+        f"  total_events : {metrics['total_events']} (min={targets['min_events']})",
+        f"  error_rate   : {metrics['error_rate'] * 100:.2f}% (max={targets['max_error_rate'] * 100:.2f}%)",
+        f"  p50_latency  : {p50}",
+        f"  p95_latency  : {p95} (max={targets['max_p95_latency_ms']:.2f} ms)",
+        f"  total_cost   : ${metrics['total_cost_usd']:.6f} (max=${targets['max_cost_usd']:.6f})",
+    ]
+    breaches = report.get("breaches") or []
+    if breaches:
+        lines.append("  breaches:")
+        for item in breaches:
+            lines.append(f"    - [{item['severity'].upper()}] {item['message']}")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mcp-observatory",
@@ -268,6 +301,64 @@ def build_parser() -> argparse.ArgumentParser:
         dest="as_json",
         action="store_true",
         help="Emit machine-readable JSON rollup",
+    )
+
+    slo_cmd = sub.add_parser(
+        "slo",
+        help="Evaluate telemetry rollups against SLO targets into slo-report-v1",
+    )
+    slo_cmd.add_argument("--db", required=True, help="Path to telemetry SQLite database file")
+    slo_cmd.add_argument(
+        "--repo",
+        dest="source_repo",
+        default=None,
+        help="Filter SLO evaluation by source_repo",
+    )
+    slo_cmd.add_argument(
+        "--since",
+        dest="since_iso",
+        default=None,
+        help="Filter events at or after ISO-8601 timestamp",
+    )
+    slo_cmd.add_argument(
+        "--max-p95-ms",
+        dest="max_p95_ms",
+        type=float,
+        default=2000.0,
+        help="Maximum allowed p95 latency in milliseconds (default: 2000.0)",
+    )
+    slo_cmd.add_argument(
+        "--max-error-rate",
+        dest="max_error_rate",
+        type=float,
+        default=0.05,
+        help="Maximum allowed error rate between 0.0 and 1.0 (default: 0.05)",
+    )
+    slo_cmd.add_argument(
+        "--max-cost-usd",
+        dest="max_cost_usd",
+        type=float,
+        default=5.0,
+        help="Maximum allowed total USD cost (default: 5.0)",
+    )
+    slo_cmd.add_argument(
+        "--min-events",
+        dest="min_events",
+        type=int,
+        default=1,
+        help="Minimum number of events required for evaluation (default: 1)",
+    )
+    slo_cmd.add_argument(
+        "--window-label",
+        dest="window_label",
+        default="all",
+        help="Label for the evaluated time window (default: all)",
+    )
+    slo_cmd.add_argument(
+        "--json",
+        dest="as_json",
+        action="store_true",
+        help="Emit machine-readable slo-report-v1 JSON output",
     )
     return parser
 
@@ -375,6 +466,38 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(_format_rollup_human(rollup))
         return 0
+
+    if args.command == "slo":
+        from mcp_observatory.exporters.slo import SLOEvaluator, SLOTargets
+        from mcp_observatory.exporters.telemetry import TelemetryRollupEngine
+
+        db_path = Path(args.db)
+        if str(args.db) != ":memory:" and not db_path.is_file():
+            print(f"Telemetry SQLite database not found: {db_path}", file=sys.stderr)
+            return 1
+        try:
+            targets = SLOTargets(
+                max_p95_latency_ms=args.max_p95_ms,
+                max_error_rate=args.max_error_rate,
+                max_cost_usd=args.max_cost_usd,
+                min_events=args.min_events,
+            )
+            with TelemetryRollupEngine(args.db) as engine:
+                evaluator = SLOEvaluator(engine)
+                report = evaluator.evaluate(
+                    targets=targets,
+                    source_repo=args.source_repo,
+                    since_iso=args.since_iso,
+                    window_label=args.window_label,
+                )
+        except (FileNotFoundError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        if args.as_json:
+            print(json.dumps(report, indent=2))
+        else:
+            print(_format_slo_human(report))
+        return 2 if report["status"] == "breach" else 0
 
     parser.print_help()
     return 1

@@ -2,6 +2,7 @@
 
 from .base import Exporter
 from .query import AuditQueryEngine, verify_audit_bundle
+from .slo import SLO_REPORT_SCHEMA, SLOEvaluator, SLOTargets
 from .sqlite import SQLiteSpanExporter
 from .sync_bridge import (
     EncryptedSyncBridge,
@@ -16,11 +17,14 @@ from .telemetry import (
 )
 
 __all__ = [
+    "SLO_REPORT_SCHEMA",
     "TELEMETRY_SCHEMA",
     "AuditQueryEngine",
     "EncryptedSyncBridge",
     "Exporter",
     "PostgresExporter",
+    "SLOEvaluator",
+    "SLOTargets",
     "SQLiteSpanExporter",
     "SyncBatchResult",
     "TelemetryRollupEngine",
